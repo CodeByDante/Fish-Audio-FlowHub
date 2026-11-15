@@ -4,6 +4,7 @@ import {webcrypto} from 'node:crypto';
 import {createPersistentStorage} from '../src/js/persistent-storage.js';
 import {createCloudEngine} from '../src/js/cloud-engine.js';
 import {QUERIES,SCHEMA_PROBE_SQL} from '../src/js/cloud-core.js';
+import {StorageManager} from '../src/js/storage.js';
 
 function fakeKV(){
   const records=new Map();
@@ -210,4 +211,39 @@ test('switching the remembered library during a manual load rejects the old resp
   assert.equal(result.code,'CONFIG_CHANGED');assert.equal(result.data,undefined);
   const cached=(await store.get(SNAPSHOT_KEY))[SNAPSHOT_KEY];
   assert.equal(cached.libraryId,otherLibrary);assert.equal(cached.snapshot.voices[0].notes,'Current library');
+});
+
+test('notes visibility defaults to visible and preserves an explicit hidden preference',()=>{
+  StorageManager.clear();
+  assert.equal(StorageManager.getSettings().showNotes,true);
+  StorageManager.saveSettings({...StorageManager.getSettings(),showNotes:false});
+  assert.equal(StorageManager.getSettings().showNotes,false);
+  StorageManager.clear();
+  assert.equal(StorageManager.getSettings().showNotes,true);
+});
+test('showing or hiding notes preserves their full content through save and zero-request restore',async()=>{
+  const kv=fakeKV();const store=adapter(kv);
+  const notes='Nota privada: pronunciación de María.\nSegunda línea con símbolos <>& y acentos.\nÚltima línea.';
+  const initial=localSnapshot(1,notes);initial.settings={showNotes:true,showSidebarFolders:true};
+  await store.set({[key]:connection,[SNAPSHOT_KEY]:envelope(initial)});
+  let calls=0;
+  const fetchImpl=async(_url,options)=>{
+    calls++;const body=JSON.parse(options.body);assert.equal(body.query,QUERIES.save);
+    const payload=JSON.parse(body.parameters[2]);
+    assert.equal(payload.voices[0].notes,notes,'visibility changes must never remove notes');
+    assert.equal(payload.settings.showNotes,calls===2);
+    return reply([{snapshot:{...payload,libraryId:identity.libraryId,revision:body.parameters[1]+1}}]);
+  };
+  const engine=testEngine(store,fetchImpl);
+  const hidden=structuredClone(initial);hidden.settings.showNotes=false;
+  assert.equal((await command(engine,'save_cloud',{data:hidden,expectedVersion:1})).success,true);
+  const reopened=testEngine(adapter(kv),async()=>{throw Error('Visibility restore must remain local');});
+  const restored=await reopened.request({action:'restore_cloud'});
+  assert.equal(restored.data.cacheAvailable,true);assert.equal(restored.data.snapshot.settings.showNotes,false);
+  assert.equal(restored.data.snapshot.voices[0].notes,notes);assert.equal(calls,1);
+  const visible=structuredClone(restored.data.snapshot);visible.settings.showNotes=true;
+  assert.equal((await command(engine,'save_cloud',{data:visible,expectedVersion:2})).data.revision,3);
+  const final=await reopened.request({action:'restore_cloud'});
+  assert.equal(final.data.snapshot.settings.showNotes,true);assert.equal(final.data.snapshot.voices[0].notes,notes);
+  assert.equal(calls,2,'only the two explicit settings saves may query Supabase');
 });

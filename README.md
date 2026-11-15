@@ -28,6 +28,7 @@ La extensión también recuerda la sesión mediante almacenamiento local cifrado
 - Buscar y ordenar voces; reproducir, pausar y desplazar el audio.
 - Agregar, editar y archivar voces; títulos, enlaces, notas y portadas.
 - Carpetas, favoritos, versiones de una voz, selección múltiple y reordenación de carpetas por arrastre.
+- **Herramientas → Mostrar notas** permite ver u ocultar las notas de cada tarjeta. Para escribirlas, abre **Editar esta voz → Notas**.
 - Subir o pegar una imagen, recortarla y guardarla en Supabase Storage.
 - Importar/exportar JSON y descargar copias de respaldo manuales.
 - Actualizar desde Supabase y sincronizar cambios entre instalaciones conectadas a la misma biblioteca.
@@ -101,7 +102,7 @@ npm run package
 npm run build:pages
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.2.1.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.2.2.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 `npm run build:pages` genera `dist/pages` usando una lista explícita de archivos públicos. `.github/workflows/pages.yml` comprueba y publica ese directorio en GitHub Pages al actualizar `main`. GitHub Actions publica el código; los datos se sincronizan a través de Supabase, no de commits.
 

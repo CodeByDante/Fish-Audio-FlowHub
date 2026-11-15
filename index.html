@@ -35,7 +35,7 @@
         </button>
 
         <!-- Tool / Settings Config Button -->
-        <button class="btn open-tab-btn" id="settingsBtn" title="Configuración de Opciones">
+        <button class="btn open-tab-btn" id="settingsBtn" title="Herramientas" aria-label="Herramientas">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
@@ -265,7 +265,7 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
-          <h3>Configuración de Opciones</h3>
+          <h3>Herramientas</h3>
         </div>
         <button class="modal-close-btn" id="closeSettingsModalBtn" title="Cerrar">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -280,7 +280,7 @@
             <p class="setting-desc-text">Muestra un menú desplegable en cada tarjeta de voz para cambiar de carpeta rápidamente.</p>
           </div>
           <label class="toggle-switch">
-            <input type="checkbox" id="toggleQuickFolderBadge">
+            <input type="checkbox" id="toggleQuickFolderBadge" aria-label="Selector rápido de carpeta en tarjetas">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -292,7 +292,18 @@
             <p class="setting-desc-text">Muestra la barra lateral y carrusel superior de carpetas.</p>
           </div>
           <label class="toggle-switch">
-            <input type="checkbox" id="toggleSidebarFolders" checked>
+            <input type="checkbox" id="toggleSidebarFolders" aria-label="Ver barra y pestañas de carpetas" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title-text" id="showNotesLabel">Mostrar notas</span>
+            <p class="setting-desc-text" id="showNotesHint">Muestra las notas debajo del título de cada voz. Para escribirlas, usa el botón Editar de la tarjeta.</p>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggleShowNotes" role="switch" aria-labelledby="showNotesLabel" aria-describedby="showNotesHint" checked>
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -304,7 +315,7 @@
             <p class="setting-desc-text">Permite seleccionar varias voces al mismo tiempo para moverlas juntas a una carpeta.</p>
           </div>
           <label class="toggle-switch">
-            <input type="checkbox" id="toggleMultiSelectMode">
+            <input type="checkbox" id="toggleMultiSelectMode" aria-label="Selector múltiple de voces">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -323,7 +334,7 @@
       </div>
 
       <div class="modal-footer" style="justify-content: flex-end; padding-top: 1rem;">
-        <button type="button" class="btn btn-primary" id="saveSettingsBtn">Guardar Cambios</button>
+        <button type="button" class="btn btn-primary" id="saveSettingsBtn">Listo</button>
       </div>
     </div>
   </div>

@@ -20,6 +20,89 @@ async function appHarness(overrides = {}) {
   return runInNewContext(source + '\nApp;', { CloudClient, StorageManager, safeAssetUrl, prepareCover, cloneSnapshot, isExtensionContext, ...overrides });
 }
 
+async function notesCardHarness() {
+  const App = await appHarness({ document: { createElement: () => ({ className: '', dataset: {}, innerHTML: '', querySelector: () => null }) } });
+  const app = Object.create(App.prototype);
+  app.settings = { showQuickFolderBadge: false, showSidebarFolders: true, showNotes: true };
+  app.selectedVoiceIds = new Set(); app.folders = []; app.currentPlayingId = null;
+  app.bindCardControls = () => {};
+  return app;
+}
+
+test('voice notes show multiline text safely, while empty notes produce no empty panel', async () => {
+  const app = await notesCardHarness();
+  const voice = { ...snapshot('Prueba').voices[0], notes: 'Primera línea\nSegunda <script>alert("x")</script> & detalles' };
+  const card = app.createCardElement(voice);
+  assert.match(card.innerHTML, /class="voice-notes"/);
+  assert.match(card.innerHTML, /Primera línea\nSegunda &lt;script&gt;/);
+  assert.match(card.innerHTML, /&amp; detalles/);
+  assert.doesNotMatch(card.innerHTML, /<script>/);
+  assert.doesNotMatch(app.createCardElement({ ...voice, notes: '  \n ' }).innerHTML, /class="voice-notes"/);
+  assert.doesNotMatch(app.createCardElement({ ...voice, notes: undefined }).innerHTML, /class="voice-notes"/);
+});
+
+test('Mostrar notas hides and restores the same notes, persists one change and Listo adds no duplicate save', async () => {
+  const app = await notesCardHarness();
+  const voice = { ...snapshot('Prueba').voices[0], notes: 'Nota personal\nSegunda línea' };
+  app.voices = [voice];
+  const saves = []; const visible = [];
+  app.autoSyncDiskFile = () => saves.push(cloneSnapshot({ settings: app.settings, voices: app.voices }));
+  app.render = () => visible.push(app.createCardElement(voice).innerHTML.includes('class="voice-notes"'));
+  app.applySettings = () => {};
+  let closed = 0; app.hideSettingsModal = () => { closed++; };
+  app.setShowNotes(false);
+  app.setShowNotes(false);
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].settings.showNotes, false);
+  assert.equal(saves[0].voices[0].notes, voice.notes);
+  assert.deepEqual(visible, [false]);
+  app.toggleQuickFolderBadge = { checked: false }; app.toggleSidebarFolders = { checked: true }; app.toggleShowNotes = { checked: false };
+  app.saveSettingsFromModal();
+  assert.equal(saves.length, 1);
+  assert.equal(closed, 1);
+  app.setShowNotes(true);
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].settings.showNotes, true);
+  assert.deepEqual(visible, [false, true]);
+  StorageManager.clear();
+});
+
+test('opening Herramientas reflects stored note preference and the current multiselect mode', async () => {
+  const App = await appHarness();
+  const app = Object.create(App.prototype);
+  app.settings = { showQuickFolderBadge: false, showSidebarFolders: true, showNotes: false };
+  app.settingsModal = { style: { display: 'none' } }; app.isMultiSelectActive = true;
+  for (const key of ['toggleQuickFolderBadge', 'toggleSidebarFolders', 'toggleShowNotes', 'toggleMultiSelectMode']) app[key] = { checked: false };
+  app.showSettingsModal();
+  assert.equal(app.settingsModal.style.display, 'flex');
+  assert.equal(app.toggleShowNotes.checked, false);
+  assert.equal(app.toggleMultiSelectMode.checked, true);
+  app.settings.showNotes = true; app.isMultiSelectActive = false; app.showSettingsModal();
+  assert.equal(app.toggleShowNotes.checked, true);
+  assert.equal(app.toggleMultiSelectMode.checked, false);
+});
+
+test('editing notes preserves multiline and literal HTML text in the saved voice', async () => {
+  const App = await appHarness();
+  const app = Object.create(App.prototype);
+  const voice = { ...snapshot('Prueba').voices[0], audioUrl: 'https://example.com/sample.mp3', notes: 'Anterior', folderId: 'f_sueltas' };
+  app.voices = [voice]; app.cloud = { connected: true, generation: 1 }; app.modalSession = 1; app.editingVoiceId = voice.id;
+  app.modalTitleInput = { value: voice.title }; app.modalUrlInput = { value: voice.url }; app.modalFolderSelect = { value: 'f_sueltas' };
+  app.modalNotesInput = { value: 'Nota editada\n<script>literal</script> & voz' };
+  app.modalSaveError = { textContent: '' }; app.saveVoiceBtn = { disabled: false, textContent: 'Guardar Voz' };
+  app.currentCroppedImage = ''; app.coverChanged = false; app.audioPlayers = new Map(); app.currentPlayingId = null;
+  const saves = [];
+  app.autoSyncDiskFile = () => saves.push(cloneSnapshot(app.voices));
+  for (const method of ['hideModal', 'renderFolders', 'render']) app[method] = () => {};
+  app.fetchFishAudioInfo = () => { throw new Error('Editing notes must not resolve existing audio'); };
+  await app.saveVoiceFromModal();
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0][0].notes, app.modalNotesInput.value);
+  assert.equal(saves[0][0].audioUrl, voice.audioUrl);
+  assert.equal(app.saveVoiceBtn.disabled, false);
+  StorageManager.clear();
+});
+
 test('only an owned extension page selects Chrome runtime; a website with chrome globals uses web', () => {
   const chrome = { runtime: { id: 'abcdefghijklmnopabcdefghijklmnop', sendMessage() {} } };
   assert.equal(isExtensionContext({ location: { protocol: 'chrome-extension:' }, chrome }), true);

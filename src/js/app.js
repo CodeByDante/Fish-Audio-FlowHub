@@ -205,7 +205,7 @@ class App {
       folderId: folderIds.has(voice.folderId) ? voice.folderId : 'f_sueltas'
     }));
     this.prunePlaybackSources();
-    this.settings = { showQuickFolderBadge: false, showSidebarFolders: true, ...(snapshot.settings || {}) };
+    this.settings = { showQuickFolderBadge: false, showSidebarFolders: true, showNotes: true, ...(snapshot.settings || {}) };
     this.selectedVoiceIds.clear();
     if (!folderIds.has(this.activeFolderId)) this.activeFolderId = 'all';
     StorageManager.saveFolders(this.folders); StorageManager.saveVoices(this.voices); StorageManager.saveSettings(this.settings);
@@ -314,6 +314,7 @@ class App {
     this.saveSettingsBtn = document.getElementById('saveSettingsBtn');
     this.toggleQuickFolderBadge = document.getElementById('toggleQuickFolderBadge');
     this.toggleSidebarFolders = document.getElementById('toggleSidebarFolders');
+    this.toggleShowNotes = document.getElementById('toggleShowNotes');
 
     // Confirm Action Modal
     this.confirmModal = document.getElementById('confirmModal');
@@ -573,6 +574,10 @@ class App {
         this.autoSyncDiskFile();
         this.applySettings();
       });
+    }
+
+    if (this.toggleShowNotes) {
+      this.toggleShowNotes.addEventListener('change', event => this.setShowNotes(event.target.checked));
     }
 
     // Multi-Select & Batch Move Events
@@ -1307,6 +1312,15 @@ class App {
     }
   }
 
+  setShowNotes(show) {
+    show = Boolean(show);
+    if ((this.settings.showNotes !== false) === show) return;
+    this.settings.showNotes = show;
+    StorageManager.saveSettings(this.settings);
+    this.autoSyncDiskFile();
+    this.render();
+  }
+
   showSettingsModal() {
     if (!this.settingsModal) return;
     this.settingsModal.style.display = 'flex';
@@ -1316,6 +1330,8 @@ class App {
     if (this.toggleSidebarFolders) {
       this.toggleSidebarFolders.checked = this.settings.showSidebarFolders !== false;
     }
+    if (this.toggleShowNotes) this.toggleShowNotes.checked = this.settings.showNotes !== false;
+    if (this.toggleMultiSelectMode) this.toggleMultiSelectMode.checked = this.isMultiSelectActive;
   }
 
   hideSettingsModal() {
@@ -1323,14 +1339,21 @@ class App {
   }
 
   saveSettingsFromModal() {
-    this.settings.showQuickFolderBadge = this.toggleQuickFolderBadge ? this.toggleQuickFolderBadge.checked : false;
-    this.settings.showSidebarFolders = this.toggleSidebarFolders ? this.toggleSidebarFolders.checked : true;
-
-    StorageManager.saveSettings(this.settings);
-    this.autoSyncDiskFile();
-    this.applySettings();
+    const next = {
+      showQuickFolderBadge: this.toggleQuickFolderBadge ? this.toggleQuickFolderBadge.checked : !!this.settings.showQuickFolderBadge,
+      showSidebarFolders: this.toggleSidebarFolders ? this.toggleSidebarFolders.checked : this.settings.showSidebarFolders !== false,
+      showNotes: this.toggleShowNotes ? this.toggleShowNotes.checked : this.settings.showNotes !== false
+    };
+    const changed = next.showQuickFolderBadge !== !!this.settings.showQuickFolderBadge
+      || next.showSidebarFolders !== (this.settings.showSidebarFolders !== false)
+      || next.showNotes !== (this.settings.showNotes !== false);
+    if (changed) {
+      Object.assign(this.settings, next);
+      StorageManager.saveSettings(this.settings);
+      this.autoSyncDiskFile();
+      this.applySettings(); this.render();
+    }
     this.hideSettingsModal();
-    this.render();
   }
 
   applySettings() {
@@ -1687,6 +1710,11 @@ class App {
       `;
     }
 
+    const notesText = typeof voice.notes === 'string' ? voice.notes.trim() : '';
+    const notesHtml = this.settings.showNotes !== false && notesText
+      ? `<div class="voice-notes" role="note" aria-label="Notas de esta voz"><span class="voice-notes-label">Notas</span><p class="voice-notes-text" tabindex="0">${this.escape(notesText)}</p></div>`
+      : '';
+
     item.innerHTML = `
       ${checkboxHtml}
       <div class="voice-cover-side">
@@ -1707,6 +1735,8 @@ class App {
             ${toggleBtnHtml}
           </div>
         </div>
+
+        ${notesHtml}
 
         <div class="player-row">
           <button class="play-toggle-btn" title="${isPlaying ? 'Pausar' : 'Reproducir'}">
