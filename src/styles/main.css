@@ -436,12 +436,7 @@ body {
   border-radius: var(--radius);
   color: var(--text-main);
   font-size: 0.85rem;
-  outline: none;
   transition: var(--transition);
-}
-
-.search-input:focus {
-  border-color: var(--border-hover);
 }
 
 .sort-btn {
@@ -1929,6 +1924,10 @@ body {
 .sync-status-pill.pending .status-pulse-dot { background: #d4ad55; box-shadow: none; }
 textarea.form-control { font: inherit; resize: vertical; min-height: 4.5rem; }
 :focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+.search-input:focus {
+  border-color: #606060;
+  outline: none;
+}
 @media (max-width: 700px) { .cloud-notice { align-items: flex-start; flex-direction: column; } .cloud-login { align-items: flex-start; padding: 1rem; } .cloud-login-card { margin-top: 2rem; padding: 1.5rem; } .header-actions { flex-wrap: wrap; } }
 
 .api-quota { display: inline-flex; align-items: center; color: #a3a3a3; border: 1px solid var(--border-color); border-radius: 999px; padding: .35rem .6rem; font-size: .6875rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
