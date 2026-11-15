@@ -245,9 +245,33 @@ class App {
     if ((this.cloud.pending || this.cloud.unsaved) && !window.confirm('Hay cambios pendientes. Expórtalos antes de salir si necesitas conservarlos. ¿Cerrar la sesión y borrar la copia de esta ventana?')) return;
     try { await this.cloud.disconnect(); }
     catch { this.setCloudNotice('No se pudo cerrar la sesión. Vuelve a intentarlo.'); return; }
+    this.hideModal(); this.hideFolderModal(); this.hideEditFolderModal(); this.hideConfirmDialog(); this.hideSettingsModal();
     this.stopAllAudio(); this.playbackSources?.clear(); this.unlinkDiskBackup(); this.displayedIdentity = null; StorageManager.clear();
     this.voices = []; this.folders = this.ensureFixedFoldersOrder([]); this.settings = StorageManager.getSettings();
     this.selectedVoiceIds.clear(); this.renderFolders(); this.render(); this.setCloudNotice(''); this.setCloudStatus('offline', 'Sesión cerrada'); this.showCloudLogin(true);
+  }
+
+  syncModalScrollLock() {
+    if (typeof document === 'undefined' || !document.documentElement?.classList || !document.body?.classList) return;
+    const open = [this.addModal, this.createFolderModal, this.editFolderModal, this.confirmModal, this.settingsModal]
+      .some(modal => modal && !modal.hidden && modal.style?.display && modal.style.display !== 'none');
+    const root = document.documentElement;
+    const body = document.body;
+    if (open && !this.modalScrollLock) {
+      this.modalScrollLock = {
+        x: globalThis.window?.scrollX || 0,
+        y: globalThis.window?.scrollY || 0,
+        rootHadClass: root.classList.contains('vault-modal-open'),
+        bodyHadClass: body.classList.contains('vault-modal-open')
+      };
+      root.classList.add('vault-modal-open'); body.classList.add('vault-modal-open');
+    } else if (!open && this.modalScrollLock) {
+      const previous = this.modalScrollLock;
+      this.modalScrollLock = null;
+      if (!previous.rootHadClass) root.classList.remove('vault-modal-open');
+      if (!previous.bodyHadClass) body.classList.remove('vault-modal-open');
+      if (globalThis.window?.scrollTo && (window.scrollX !== previous.x || window.scrollY !== previous.y)) window.scrollTo({ left: previous.x, top: previous.y, behavior: 'instant' });
+    }
   }
 
   bindDOM() {
@@ -874,11 +898,13 @@ class App {
   showFolderModal() {
     if (this.newFolderNameInput) this.newFolderNameInput.value = '';
     if (this.createFolderModal) this.createFolderModal.style.display = 'flex';
+    this.syncModalScrollLock();
     if (this.newFolderNameInput) this.newFolderNameInput.focus();
   }
 
   hideFolderModal() {
     if (this.createFolderModal) this.createFolderModal.style.display = 'none';
+    this.syncModalScrollLock();
     if (this.newFolderNameInput) this.newFolderNameInput.value = '';
   }
 
@@ -888,11 +914,13 @@ class App {
 
     if (this.editFolderNameInput) this.editFolderNameInput.value = currentFolder.name;
     if (this.editFolderModal) this.editFolderModal.style.display = 'flex';
+    this.syncModalScrollLock();
     if (this.editFolderNameInput) this.editFolderNameInput.focus();
   }
 
   hideEditFolderModal() {
     if (this.editFolderModal) this.editFolderModal.style.display = 'none';
+    this.syncModalScrollLock();
     if (this.editFolderNameInput) this.editFolderNameInput.value = '';
   }
 
@@ -1141,6 +1169,7 @@ class App {
     this.clearCroppedImage();
     this.coverChanged = false;
     if (this.addModal) this.addModal.style.display = 'flex';
+    this.syncModalScrollLock();
     if (this.modalTitleInput) this.modalTitleInput.focus();
   }
 
@@ -1164,12 +1193,14 @@ class App {
 
     this.coverChanged = false;
     if (this.addModal) this.addModal.style.display = 'flex';
+    this.syncModalScrollLock();
     if (this.modalTitleInput) this.modalTitleInput.focus();
   }
 
   hideModal() {
     this.modalSession += 1;
     if (this.addModal) this.addModal.style.display = 'none';
+    this.syncModalScrollLock();
     this.editingVoiceId = null;
     if (this.modalTitleInput) this.modalTitleInput.value = '';
     if (this.modalUrlInput) this.modalUrlInput.value = '';
@@ -1265,10 +1296,12 @@ class App {
     if (this.confirmModalText) this.confirmModalText.textContent = message || '¿Estás seguro de continuar?';
     this.onConfirmCallback = onConfirm;
     this.confirmModal.style.display = 'flex';
+    this.syncModalScrollLock();
   }
 
   hideConfirmDialog() {
     if (this.confirmModal) this.confirmModal.style.display = 'none';
+    this.syncModalScrollLock();
     this.onConfirmCallback = null;
   }
 
@@ -1324,6 +1357,7 @@ class App {
   showSettingsModal() {
     if (!this.settingsModal) return;
     this.settingsModal.style.display = 'flex';
+    this.syncModalScrollLock();
     if (this.toggleQuickFolderBadge) {
       this.toggleQuickFolderBadge.checked = !!this.settings.showQuickFolderBadge;
     }
@@ -1336,6 +1370,7 @@ class App {
 
   hideSettingsModal() {
     if (this.settingsModal) this.settingsModal.style.display = 'none';
+    this.syncModalScrollLock();
   }
 
   saveSettingsFromModal() {
@@ -1639,6 +1674,28 @@ class App {
     this.setCloudNotice('Una portada necesita renovar su enlace. Pulsa Actualizar cuando quieras consultarla en Supabase.', false, true);
   }
 
+  bindNotesReadingControls(notes) {
+    if (!notes?.addEventListener) return;
+    notes.addEventListener('keydown', event => {
+      if (event.target !== notes || event.ctrlKey || event.metaKey || event.altKey) return;
+      const key = event.key;
+      if (event.shiftKey && key !== ' ' && key !== 'Spacebar') return;
+      const maximum = Math.max(0, notes.scrollHeight - notes.clientHeight);
+      const page = Math.max(40, Math.round(notes.clientHeight * .9));
+      let next;
+      if (key === 'ArrowDown') next = notes.scrollTop + 40;
+      else if (key === 'ArrowUp') next = notes.scrollTop - 40;
+      else if (key === 'PageDown') next = notes.scrollTop + page;
+      else if (key === 'PageUp') next = notes.scrollTop - page;
+      else if (key === 'Home') next = 0;
+      else if (key === 'End') next = maximum;
+      else if (key === ' ' || key === 'Spacebar') next = notes.scrollTop + (event.shiftKey ? -page : page);
+      else return;
+      event.preventDefault();
+      notes.scrollTop = Math.min(maximum, Math.max(0, next));
+    });
+  }
+
   createCardElement(voice, options = {}) {
     const isSelected = this.selectedVoiceIds.has(voice.id);
     const item = document.createElement('div');
@@ -1760,6 +1817,7 @@ class App {
     `;
 
     item.querySelector('img')?.addEventListener('error', event => { event.target.parentElement.innerHTML = svgPlaceholder; this.refreshExpiredCover(voice); }, { once: true });
+    this.bindNotesReadingControls(item.querySelector('.voice-notes-text'));
     this.bindCardControls(item, voice);
     return item;
   }

@@ -1986,3 +1986,11 @@ textarea.form-control { font: inherit; resize: vertical; min-height: 4.5rem; }
   .batch-action-bar { min-width: 0; width: calc(100% - 1.5rem); max-width: calc(100% - 1.5rem); flex-wrap: wrap; gap: .75rem; padding: .75rem; bottom: .75rem; }
   .batch-controls { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 }
+
+/* Notes scroll inside their own area without native rails or page chaining. */
+#modalNotesInput, .voice-notes-text { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -ms-overflow-style: none; }
+#modalNotesInput { resize: none; min-height: 6rem; }
+#modalNotesInput::-webkit-scrollbar, .voice-notes-text::-webkit-scrollbar { display: none; width: 0; height: 0; background: transparent; }
+#modalNotesInput::-webkit-resizer { display: none; }
+html.vault-modal-open, body.vault-modal-open { overflow: hidden !important; overscroll-behavior: none; }
+#addModal, #addModal .modal-content { overscroll-behavior: contain; }

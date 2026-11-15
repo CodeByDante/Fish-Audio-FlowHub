@@ -1,6 +1,6 @@
 {
   "name": "fish-audio-vault-online",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "private": true,
   "type": "module",
   "description": "Biblioteca Fish Audio sincronizada entre Chrome y GitHub Pages mediante Supabase.",

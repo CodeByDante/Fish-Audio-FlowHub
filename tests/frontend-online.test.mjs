@@ -29,6 +29,92 @@ async function notesCardHarness() {
   return app;
 }
 
+async function modalLockHarness() {
+  const classList = initial => {
+    const classes = new Set(initial);
+    return { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name) };
+  };
+  const root = { classList: classList(['dark-root']), style: { overflow: 'scroll' } };
+  const body = { classList: classList(['dark-body']), style: { overflow: 'clip' } };
+  const window = { scrollX: 4, scrollY: 850, scrollTo(position) { this.scrollX = position.left; this.scrollY = position.top; } };
+  const App = await appHarness({ document: { documentElement: root, body }, window });
+  const app = Object.create(App.prototype);
+  app.modalSession = 0;
+  for (const name of ['addModal', 'createFolderModal', 'editFolderModal', 'confirmModal', 'settingsModal']) app[name] = { style: { display: 'none' } };
+  app.clearCroppedImage = () => {};
+  return { app, root, body, window };
+}
+
+test('voice modal locks both scroll roots without changing inline styles and restores position after close', async () => {
+  const { app, root, body, window } = await modalLockHarness();
+  app.showModal();
+  assert.equal(root.classList.contains('vault-modal-open'), true);
+  assert.equal(body.classList.contains('vault-modal-open'), true);
+  assert.equal(root.style.overflow, 'scroll');
+  assert.equal(body.style.overflow, 'clip');
+  window.scrollY = 910;
+  app.hideModal();
+  assert.equal(window.scrollY, 850);
+  assert.equal(window.scrollX, 4);
+  assert.equal(root.classList.contains('vault-modal-open'), false);
+  assert.equal(body.classList.contains('vault-modal-open'), false);
+  assert.equal(root.classList.contains('dark-root'), true);
+  assert.equal(body.classList.contains('dark-body'), true);
+  app.showEditModal({ id: 'test', notes: '', coverImage: '' });
+  assert.equal(root.classList.contains('vault-modal-open'), true);
+  app.hideModal();
+  assert.equal(root.classList.contains('vault-modal-open'), false);
+});
+
+test('closing one nested modal does not unlock the page until the remaining dialog closes', async () => {
+  const { app, root, window } = await modalLockHarness();
+  app.showModal();
+  app.showConfirmDialog('Confirmar', 'Prueba', () => {});
+  window.scrollY = 900;
+  app.hideModal();
+  assert.equal(root.classList.contains('vault-modal-open'), true);
+  assert.equal(window.scrollY, 900);
+  app.hideConfirmDialog();
+  assert.equal(root.classList.contains('vault-modal-open'), false);
+  assert.equal(window.scrollY, 850);
+  app.hideConfirmDialog();
+  assert.equal(window.scrollY, 850);
+});
+
+test('logout closes visible dialogs and releases their background scroll lock', async () => {
+  const { app, root } = await modalLockHarness();
+  app.cloud = { pending: 0, unsaved: false, disconnect: async () => {} };
+  app.selectedVoiceIds = new Set(); app.playbackSources = new Map();
+  for (const name of ['stopAllAudio', 'unlinkDiskBackup', 'renderFolders', 'render', 'setCloudNotice', 'setCloudStatus', 'showCloudLogin']) app[name] = () => {};
+  app.showModal(); app.showConfirmDialog('Confirmar', 'Prueba', () => {});
+  assert.equal(root.classList.contains('vault-modal-open'), true);
+  await app.disconnectCloud();
+  for (const name of ['addModal', 'createFolderModal', 'editFolderModal', 'confirmModal', 'settingsModal']) assert.equal(app[name].style.display, 'none');
+  assert.equal(root.classList.contains('vault-modal-open'), false);
+});
+
+test('focused read-only notes keep keyboard scrolling inside their bounds without intercepting textarea keys or wheel', async () => {
+  const App = await appHarness();
+  const app = Object.create(App.prototype);
+  const listeners = new Map();
+  const notes = { scrollTop: 0, scrollHeight: 1000, clientHeight: 100, addEventListener: (name, listener) => listeners.set(name, listener) };
+  app.bindNotesReadingControls(notes);
+  assert.deepEqual([...listeners.keys()], ['keydown']);
+  let prevented = 0;
+  const key = (name, overrides = {}) => listeners.get('keydown')({ key: name, target: notes, preventDefault: () => { prevented++; }, ...overrides });
+  key('ArrowDown'); assert.equal(notes.scrollTop, 40);
+  key('End'); assert.equal(notes.scrollTop, 900);
+  key('ArrowDown'); assert.equal(notes.scrollTop, 900);
+  key('Home'); assert.equal(notes.scrollTop, 0);
+  key('ArrowUp'); assert.equal(notes.scrollTop, 0);
+  const before = prevented;
+  key('ArrowDown', { target: { tagName: 'TEXTAREA' } });
+  key('ArrowDown', { shiftKey: true });
+  key('ArrowDown', { ctrlKey: true });
+  assert.equal(prevented, before);
+  assert.equal(notes.scrollTop, 0);
+});
+
 test('voice notes show multiline text safely, while empty notes produce no empty panel', async () => {
   const app = await notesCardHarness();
   const voice = { ...snapshot('Prueba').voices[0], notes: 'Primera línea\nSegunda <script>alert("x")</script> & detalles' };
