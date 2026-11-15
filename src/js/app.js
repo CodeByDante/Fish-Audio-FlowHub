@@ -18,6 +18,7 @@ class App {
     this.isMultiSelectActive = false;
     this.activeFolderId = 'all';
     this.audioPlayers = new Map();
+    this.playbackSources = new Map();
     this.currentPlayingId = null;
     this.editingVoiceId = null;
     this.currentCroppedImage = '';
@@ -167,7 +168,7 @@ class App {
     const snapshot = result.snapshot;
     if (result.projectRef && result.libraryId) {
       const identity = result.projectRef + '/' + result.libraryId;
-      if (this.displayedIdentity && this.displayedIdentity !== identity) this.unlinkDiskBackup();
+      if (this.displayedIdentity && this.displayedIdentity !== identity) { this.unlinkDiskBackup(); this.playbackSources?.clear(); }
       this.displayedIdentity = identity;
     }
     this.stopAllAudio();
@@ -182,6 +183,7 @@ class App {
       coverImage: safeAssetUrl(voice.coverImage, 'image'),
       folderId: folderIds.has(voice.folderId) ? voice.folderId : 'f_sueltas'
     }));
+    this.prunePlaybackSources();
     this.settings = { showQuickFolderBadge: false, showSidebarFolders: true, ...(snapshot.settings || {}) };
     this.selectedVoiceIds.clear();
     if (!folderIds.has(this.activeFolderId)) this.activeFolderId = 'all';
@@ -210,7 +212,7 @@ class App {
     if ((this.cloud.pending || this.cloud.unsaved) && !window.confirm('Hay cambios pendientes. Expórtalos antes de salir si necesitas conservarlos. ¿Cerrar la sesión y borrar la copia de esta ventana?')) return;
     try { await this.cloud.disconnect(); }
     catch { this.setCloudNotice('No se pudo cerrar la sesión. Vuelve a intentarlo.'); return; }
-    this.stopAllAudio(); this.unlinkDiskBackup(); this.displayedIdentity = null; StorageManager.clear();
+    this.stopAllAudio(); this.playbackSources?.clear(); this.unlinkDiskBackup(); this.displayedIdentity = null; StorageManager.clear();
     this.voices = []; this.folders = this.ensureFixedFoldersOrder([]); this.settings = StorageManager.getSettings();
     this.selectedVoiceIds.clear(); this.renderFolders(); this.render(); this.setCloudNotice(''); this.setCloudStatus('offline', 'Sesión cerrada'); this.showCloudLogin(true);
   }
@@ -1907,11 +1909,14 @@ class App {
       folderSelect.addEventListener('click', (e) => e.stopPropagation());
     }
 
-    const streamSource = safeAssetUrl(voice.audioUrl, 'audio');
+    const streamSource = this.getPlaybackSource(voice);
 
     let audio = this.audioPlayers.get(voice.id);
-    if (!audio) {
+    const sourceKey = this.playbackSourceKey(voice);
+    if (!audio || audio.voiceSourceKey !== sourceKey) {
+      if (audio) audio.pause();
       audio = new Audio();
+      audio.voiceSourceKey = sourceKey;
       audio.preload = 'metadata'; // Read duration without downloading all samples.
       if (streamSource) {
         audio.src = streamSource;
@@ -1991,27 +1996,60 @@ class App {
     });
   }
 
+  playbackSourceKey(voice) {
+    return JSON.stringify([String(voice.id), voice.url || '', voice.audioUrl || '']);
+  }
+
+  getPlaybackSource(voice) {
+    const key = this.playbackSourceKey(voice);
+    const cached = this.playbackSources?.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.url;
+    this.playbackSources?.delete(key);
+    return safeAssetUrl(voice.audioUrl, 'audio');
+  }
+
+  rememberPlaybackSource(voice, url) {
+    const source = safeAssetUrl(url, 'audio');
+    if (!source) return '';
+    if (!this.playbackSources) this.playbackSources = new Map();
+    const key = this.playbackSourceKey(voice);
+    this.playbackSources.delete(key);
+    this.playbackSources.set(key, { url: source, expiresAt: Date.now() + 30 * 60 * 1000 });
+    while (this.playbackSources.size > 256) this.playbackSources.delete(this.playbackSources.keys().next().value);
+    return source;
+  }
+
+  prunePlaybackSources() {
+    if (!this.playbackSources) return;
+    const liveKeys = new Set(this.voices.map(voice => this.playbackSourceKey(voice)));
+    for (const [key, source] of this.playbackSources) {
+      if (!liveKeys.has(key) || source.expiresAt <= Date.now()) this.playbackSources.delete(key);
+    }
+  }
+
   async playAudio(id) {
     const audio = this.audioPlayers.get(id);
     const voice = this.voices.find(item => item.id === id);
     if (!audio || !voice) return;
     const requestId = (this.playRequestId || 0) + 1;
+    const generation = this.cloud.generation;
     this.playRequestId = requestId; this.desiredPlayingId = id;
     const card = document.querySelector(`.voice-item[data-id="${CSS.escape(String(id))}"]`);
     const btn = card?.querySelector('.play-toggle-btn');
     const curTimeEl = card?.querySelector('.cur-time');
-    const isCurrent = () => this.playRequestId === requestId && this.desiredPlayingId === id;
+    const isCurrent = () => this.playRequestId === requestId && this.desiredPlayingId === id && this.cloud.generation === generation;
     const match = voice.url.match(/m\/([a-zA-Z0-9_]+)/i) || voice.url.match(/([a-f0-9]{12,32})/i);
     let refreshed = false;
     const refresh = async () => {
       if (!match || refreshed) return false;
       refreshed = true;
+      this.playbackSources?.delete(this.playbackSourceKey(voice));
       const info = await this.fetchFishAudioInfo(match[1]);
       if (!isCurrent() || !info?.sampleAudio) return false;
-      voice.audioUrl = safeAssetUrl(info.sampleAudio, 'audio');
-      if (!voice.audioUrl) return false;
-      audio.src = voice.audioUrl; audio.load();
-      StorageManager.saveVoices(this.voices); this.autoSyncDiskFile();
+      const source = this.rememberPlaybackSource(voice, info.sampleAudio);
+      if (!source) return false;
+      // Signed Fish Audio samples are transient playback data, not library edits.
+      audio.src = source; audio.load();
       return true;
     };
     if (btn) btn.textContent = '...';

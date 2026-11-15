@@ -33,14 +33,14 @@ Las portadas nuevas se suben al bucket privado `voice-vault-images`. Se aceptan 
 
 El nombre del archivo usa SHA-256: volver a subir exactamente la misma imagen reutiliza su objeto. Al reemplazar o quitar una portada se conserva el objeto anterior; no hay borrado físico automático. Los archivos antiguos pueden limpiarse manualmente desde Storage cuando ya no se necesiten. El límite de 512 KiB es por imagen, no una medición del espacio total del plan.
 
-Los audios se reproducen desde sus enlaces de Fish Audio; no se guardan archivos de audio en Supabase. La extensión puede consultar el modelo de Fish Audio para renovar una muestra, usando la sesión del propio navegador cuando el servicio lo permita. Los permisos y disponibilidad de Fish Audio siguen siendo necesarios.
+Los audios se reproducen desde sus enlaces de Fish Audio; no se guardan archivos de audio en Supabase. Reproducir, pausar o renovar un enlace de muestra no guarda la biblioteca ni consume peticiones de Supabase. Los enlaces renovados se reutilizan en una caché temporal de la sesión; se borran al salir o cambiar de biblioteca. La consulta periódica de sincronización se cuenta por separado. La extensión puede consultar el modelo de Fish Audio para renovar una muestra, usando la sesión del propio navegador cuando el servicio lo permita. Los permisos y disponibilidad de Fish Audio siguen siendo necesarios.
 
 ## Contador de API
 
 Según la [documentación de Supabase](https://supabase.com/docs/reference/api/introduction), la cuota de Management API es por usuario, proyecto y endpoint, compartida entre sus tokens. La aplicación lee los encabezados reales de Supabase; si no están disponibles muestra **estimado**. El tiempo de reinicio del servidor se interpreta en segundos restantes.
 
 - Leer las 118 voces juntas consume **una petición**, no 118.
-- Cada guardado consume una petición.
+- Cada guardado de una edición consume una petición. Escuchar o renovar una muestra de Fish Audio no guarda datos en Supabase.
 - Subir o firmar un lote de imágenes hace una consulta adicional para autorizar el token; también se cuenta.
 - La firma de portadas se reutiliza mientras sea válida.
 - El reloj y las consultas internas del indicador no hacen llamadas HTTP.
@@ -82,7 +82,7 @@ npm test
 npm run package
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.0.0.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.0.1.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 La extensión se instala en Chrome; abrir `index.html` como una web normal no proporciona el service worker ni la API `chrome.storage.session`.
 

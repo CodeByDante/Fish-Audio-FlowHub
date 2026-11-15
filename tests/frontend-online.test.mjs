@@ -288,3 +288,100 @@ test('original vault affordances remain and no local-server or bundled voice fal
   assert.doesNotMatch(html, /fonts\.(?:googleapis|gstatic)\.com|onerror=/);
   assert.doesNotMatch(app, /onerror=|preload = 'auto'/);
 });
+
+async function playbackHarness(audioUrl = 'https://samples.example.com/original.mp3') {
+  const controls = new Map();
+  const item = { querySelector(selector) {
+    if (['.card-checkbox', '.quick-folder-select'].includes(selector)) return null;
+    if (!controls.has(selector)) controls.set(selector, { textContent: '', style: {}, addEventListener() {} });
+    return controls.get(selector);
+  } };
+  const counters = { fish: 0, cloud: 0, storage: 0, disk: 0 };
+  const failing = new Set();
+  class FakeAudio {
+    constructor() { this.src = ''; this.paused = true; this.currentTime = 0; }
+    async play() { if (failing.has(this.src)) throw new Error('Expired sample'); this.paused = false; }
+    pause() { this.paused = true; }
+    load() {}
+    removeAttribute(name) { if (name === 'src') this.src = ''; }
+  }
+  const memory = { saveVoices() { counters.storage++; }, saveFolders() {}, saveSettings() {}, clear() {}, getSettings() { return {}; } };
+  const App = await appHarness({ Audio: FakeAudio, document: { querySelector: () => item }, CSS: { escape: String }, StorageManager: memory });
+  const app = Object.create(App.prototype);
+  app.voices = [{ id: 'voice-test', title: 'Prueba', url: 'https://fish.audio/m/00000000000000000000000000000001', audioUrl }];
+  app.folders = [{ id: 'all', name: 'Todas' }]; app.settings = {}; app.selectedVoiceIds = new Set(); app.activeFolderId = 'all';
+  app.audioPlayers = new Map(); app.playbackSources = new Map(); app.currentPlayingId = null;
+  app.cloud = { generation: 0, pending: 0, unsaved: false, save() { counters.cloud++; }, async disconnect() { this.generation++; } };
+  app.startSmoothProgressLoop = () => {}; app.stopSmoothProgressLoop = () => {};
+  app.fetchFishAudioInfo = async () => { counters.fish++; return { sampleAudio: 'https://samples.example.com/fresh-' + counters.fish + '.mp3' }; };
+  app.autoSyncDiskFile = () => { counters.disk++; counters.cloud++; };
+  for (const method of ['applySettings', 'renderFolders', 'setCloudNotice', 'setCloudStatus', 'showCloudLogin']) app[method] = () => {};
+  app.render = () => { for (const voice of app.voices) app.bindCardControls(item, voice); };
+  app.render();
+  return { app, counters, failing, controls };
+}
+
+test('playing a valid Fish sample makes zero Supabase, storage or disk writes', async () => {
+  const { app, counters } = await playbackHarness();
+  const before = JSON.stringify(app.voices);
+  await app.playAudio('voice-test');
+  assert.equal(app.currentPlayingId, 'voice-test');
+  assert.deepEqual(counters, { fish: 0, cloud: 0, storage: 0, disk: 0 });
+  assert.equal(JSON.stringify(app.voices), before);
+});
+
+test('renewing an expired sample stays transient and reuses its cache after a snapshot render', async () => {
+  const { app, counters, failing } = await playbackHarness();
+  const canonical = JSON.parse(JSON.stringify(app.voices));
+  failing.add(canonical[0].audioUrl);
+  await app.playAudio('voice-test');
+  assert.equal(counters.fish, 1);
+  assert.equal(app.audioPlayers.get('voice-test').src, 'https://samples.example.com/fresh-1.mp3');
+  assert.equal(JSON.stringify(app.voices), JSON.stringify(canonical));
+  assert.equal(counters.cloud, 0); assert.equal(counters.storage, 0); assert.equal(counters.disk, 0);
+  const result = { projectRef: 'abcdefghijklmnopqrst', libraryId: 'library-one', snapshot: { folders: app.folders, voices: canonical, settings: {} } };
+  app.applyCloudSnapshot(result);
+  assert.equal(app.audioPlayers.get('voice-test').src, 'https://samples.example.com/fresh-1.mp3');
+  const writesBeforePlay = counters.storage;
+  await app.playAudio('voice-test');
+  assert.equal(counters.fish, 1); assert.equal(counters.storage, writesBeforePlay);
+  assert.equal(counters.cloud, 0); assert.equal(counters.disk, 0);
+  // A failed cached link forces exactly one fresh Fish request, still no save.
+  failing.add('https://samples.example.com/fresh-1.mp3');
+  app.pauseAudio('voice-test');
+  await app.playAudio('voice-test');
+  assert.equal(counters.fish, 2);
+  assert.equal(app.audioPlayers.get('voice-test').src, 'https://samples.example.com/fresh-2.mp3');
+  assert.equal(counters.cloud, 0); assert.equal(counters.storage, writesBeforePlay); assert.equal(counters.disk, 0);
+});
+
+test('playback cache invalidates canonical source changes and clears on library switch and logout', async () => {
+  const { app, counters } = await playbackHarness('');
+  await app.playAudio('voice-test');
+  assert.equal(app.playbackSources.size, 1);
+  app.voices[0].audioUrl = 'https://samples.example.com/edited.mp3';
+  app.render();
+  assert.equal(app.audioPlayers.get('voice-test').src, 'https://samples.example.com/edited.mp3');
+  assert.equal(app.getPlaybackSource(app.voices[0]), 'https://samples.example.com/edited.mp3');
+  app.prunePlaybackSources(); assert.equal(app.playbackSources.size, 0);
+  app.rememberPlaybackSource(app.voices[0], 'https://samples.example.com/cached.mp3');
+  app.displayedIdentity = 'abcdefghijklmnopqrst/old-library';
+  app.applyCloudSnapshot({ projectRef: 'abcdefghijklmnopqrst', libraryId: 'new-library', snapshot: { folders: app.folders, voices: app.voices, settings: {} } });
+  assert.equal(app.playbackSources.size, 0);
+  app.rememberPlaybackSource(app.voices[0], 'https://samples.example.com/cached-again.mp3');
+  await app.disconnectCloud();
+  assert.equal(app.playbackSources.size, 0); assert.equal(app.voices.length, 0);
+  assert.equal(counters.cloud, 0); assert.equal(counters.disk, 0);
+});
+
+test('logout discards a delayed Fish response without repopulating playback cache or writing data', async () => {
+  const { app, counters } = await playbackHarness('');
+  let release;
+  app.fetchFishAudioInfo = async () => new Promise(resolve => { release = resolve; });
+  const playback = app.playAudio('voice-test');
+  await app.disconnectCloud();
+  release({ sampleAudio: 'https://samples.example.com/late.mp3' });
+  await playback;
+  assert.equal(app.playbackSources.size, 0); assert.equal(app.voices.length, 0); assert.equal(app.audioPlayers.size, 0);
+  assert.equal(counters.cloud, 0); assert.equal(counters.storage, 0); assert.equal(counters.disk, 0);
+});
