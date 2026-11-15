@@ -1,5 +1,5 @@
 import { StorageManager } from './storage.js';
-import { CloudClient, safeAssetUrl, cloneSnapshot, prepareCover } from './cloud-client.js';
+import { CloudClient, safeAssetUrl, cloneSnapshot, prepareCover, isExtensionContext } from './cloud-client.js';
 
 const DEFAULT_FOLDERS = [
   { id: "all", name: "Todas" },
@@ -79,6 +79,8 @@ class App {
     this.cloudProjectInput = document.getElementById('cloudProjectInput');
     this.cloudLibraryInput = document.getElementById('cloudLibraryInput');
     this.cloudLoginError = document.getElementById('cloudLoginError');
+    const tokenHint = document.getElementById('cloudTokenHint');
+    if (tokenHint) tokenHint.textContent = 'La sesión se recuerda en este navegador hasta que pulses Cerrar sesión.';
     this.cloudLoginForm?.addEventListener('submit', async event => {
       event.preventDefault();
       const token = this.cloudTokenInput.value.trim();
@@ -92,7 +94,12 @@ class App {
         this.showCloudLogin(false);
         this.setCloudStatus('online', 'Supabase conectado');
         this.setCloudNotice('');
-      } catch (error) { this.cloudLoginError.textContent = error.message; this.setCloudStatus('offline', 'Sin conexión'); }
+      } catch (error) {
+        this.cloudLoginError.textContent = !isExtensionContext() && error.code === 'NETWORK'
+          ? error.message + ' Comprueba tu conexión y el acceso del proyecto desde la web. Vuelve a introducir el token para reintentar.'
+          : error.message;
+        this.setCloudStatus('offline', 'Sin conexión');
+      }
       finally { submit.disabled = false; submit.textContent = originalLabel; }
     });
     document.getElementById('cloudCancelLoginBtn')?.addEventListener('click', () => this.showCloudLogin(false));
@@ -321,6 +328,7 @@ class App {
   }
 
   checkViewMode() {
+    if (!isExtensionContext()) { if (this.openTabBtn) { this.openTabBtn.hidden = true; this.openTabBtn.style.display = 'none'; } return; }
     const isExtensionPopup = window.chrome && chrome.extension && chrome.extension.getViews &&
                              chrome.extension.getViews({ type: 'popup' }).includes(window);
 
@@ -369,9 +377,11 @@ class App {
 
   async checkServerStatus(resume = false) {
     try {
-      const status = await this.cloud.status();
+      const status = resume && !this.cloud.connected && !this.cloud.pending && !this.cloud.unsaved
+        ? await this.cloud.restore() : await this.cloud.status();
       if (status.connected && resume) {
-        this.cloud.connected = true;
+        if (this.cloudProjectInput) this.cloudProjectInput.value = status.projectRef || this.cloud.projectRef || '';
+        if (this.cloudLibraryInput) this.cloudLibraryInput.value = status.libraryId || this.cloud.libraryId || '';
         await this.loadData(); this.showCloudLogin(false); this.setCloudStatus('online', 'Supabase conectado');
       } else if (!status.connected) { this.setCloudStatus('offline', 'Conecta tu biblioteca'); this.showCloudLogin(true); }
     } catch { this.setCloudStatus('offline', 'Conecta tu biblioteca'); this.showCloudLogin(true); }
@@ -1084,7 +1094,7 @@ class App {
   }
 
   openNewTab() {
-    if (window.chrome && chrome.runtime && chrome.runtime.sendMessage) {
+    if (isExtensionContext()) {
       chrome.runtime.sendMessage({ action: 'open_tab' }, (response) => {
         if (!response || !response.success) {
           window.open(window.location.href, '_blank');
@@ -1151,13 +1161,8 @@ class App {
     if (this.metadataRequests.has(modelId)) return this.metadataRequests.get(modelId);
     const request = (async () => {
       try {
-        const result = await new Promise(resolve => {
-          chrome.runtime.sendMessage({ action: 'resolve_fish_audio', ...this.cloud.identity(), modelId }, response => {
-            if (chrome.runtime.lastError) resolve(null); else resolve(response);
-          });
-        });
-        if (!result?.success || !result.data) return null;
-        const data = result.data;
+        const data = await this.cloud.request('resolve_fish_audio', { ...this.cloud.identity(), modelId });
+        if (!data || typeof data !== 'object') return null;
         const sample = safeAssetUrl(data.samples?.[0]?.audio || data.audioUrl, 'audio');
         const rawCover = data.cover_image || data.coverImage || '';
         const cover = safeAssetUrl(rawCover.startsWith('https://') ? rawCover : rawCover ? 'https://public-platform.r2.fish.audio/' + rawCover : '', 'image');

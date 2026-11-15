@@ -6,3 +6,8 @@
 [functions.voice-vault-storage]
 verify_jwt = false
 entrypoint = "./functions/voice-vault-storage/index.ts"
+
+# Browser relay validates the caller PAT through fixed Management API operations.
+[functions.voice-vault-api]
+verify_jwt = false
+entrypoint = "./functions/voice-vault-api/index.ts"

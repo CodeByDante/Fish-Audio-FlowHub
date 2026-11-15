@@ -4,22 +4,33 @@ export class CloudError extends Error {
   constructor(message, code = 'NETWORK') { super(message); this.name = 'CloudError'; this.code = code; }
 }
 
-export function runtimeRequest(action, payload = {}) {
-  return new Promise((resolve, reject) => {
-    if (!globalThis.chrome?.runtime?.sendMessage) {
-      reject(new CloudError('Abre la aplicación desde la extensión de Chrome.', 'NOT_CONNECTED'));
-      return;
-    }
-    chrome.runtime.sendMessage({ action, ...payload }, response => {
-      if (chrome.runtime.lastError) reject(new CloudError('No se pudo comunicar con la extensión. Vuelve a abrirla.', 'NETWORK'));
-      else if (!response?.success) {
-        const error = new CloudError(response?.error || 'No se pudo completar la operación online.', response?.code || 'NETWORK');
-        error.rateLimit = response?.rateLimit || null;
-        reject(error);
-      }
-      else resolve(response.data || {});
+export function isExtensionContext(environment = globalThis) {
+  return environment.location?.protocol === 'chrome-extension:' && Boolean(environment.chrome?.runtime?.id && environment.chrome?.runtime?.sendMessage);
+}
+
+function unwrapResponse(response) {
+  if (!response?.success) {
+    const error = new CloudError(response?.error || 'No se pudo completar la operación online.', response?.code || 'NETWORK');
+    error.rateLimit = response?.rateLimit || null;
+    throw error;
+  }
+  return response.data || {};
+}
+
+export async function runtimeRequest(action, payload = {}) {
+  if (isExtensionContext()) {
+    const response = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ action, ...payload }, result => {
+        if (chrome.runtime.lastError) reject(new CloudError('No se pudo comunicar con la extensión. Vuelve a abrirla.', 'NETWORK'));
+        else resolve(result);
+      });
     });
-  });
+    return unwrapResponse(response);
+  }
+  let webRequest;
+  try { ({ webRequest } = await import('./web-transport.js')); }
+  catch { throw new CloudError('No se pudo cargar la conexión web. Recarga la página y vuelve a conectar.', 'NETWORK'); }
+  return unwrapResponse(await webRequest(action, payload));
 }
 
 export class CloudClient {
@@ -98,6 +109,18 @@ export class CloudClient {
     const result = await this.request('upload_cover', { ...this.identity(), dataUrl });
     if (generation !== this.generation) throw new CloudError('Sesión cerrada.', 'NOT_CONNECTED');
     if (typeof result.path !== 'string' || !result.path || result.path.includes('..') || !safeAssetUrl(result.url, 'image')) throw new CloudError('La subida no devolvió una portada válida.', 'VALIDATION');
+    return result;
+  }
+  async restore() {
+    if (this.connected || this.pending || this.unsaved || this.revision !== 0) throw new CloudError('La sesión solo puede recuperarse antes de cargar o editar una biblioteca.', 'PENDING');
+    const generation = this.generation;
+    const result = await this.request('restore_cloud');
+    if (generation !== this.generation) throw new CloudError('Sesión cerrada.', 'NOT_CONNECTED');
+    if (this.connected || this.pending || this.unsaved || this.revision !== 0) throw new CloudError('La biblioteca cambió mientras se recuperaba la sesión.', 'PENDING');
+    if (result.connected) {
+      if (typeof result.projectRef !== 'string' || !result.projectRef || typeof result.libraryId !== 'string' || !result.libraryId) throw new CloudError('No se pudo recuperar la configuración de la sesión.', 'VALIDATION');
+      this.projectRef = result.projectRef; this.libraryId = result.libraryId;
+    }
     return result;
   }
   status() { return this.request('cloud_status', this.identity()); }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { CloudClient, CloudError, safeAssetUrl, prepareCover, cloneSnapshot } from '../src/js/cloud-client.js';
+import { CloudClient, CloudError, safeAssetUrl, prepareCover, cloneSnapshot, isExtensionContext, runtimeRequest } from '../src/js/cloud-client.js';
 import { StorageManager } from '../src/js/storage.js';
 
 const fixture = (revision = 1, title = 'Prueba') => ({
@@ -17,8 +17,73 @@ async function appHarness(overrides = {}) {
   const source = (await readFile(new URL('../src/js/app.js', import.meta.url), 'utf8'))
     .replace(/^import[^\n]+\n/gm, '')
     .replace(/document\.addEventListener\('DOMContentLoaded',[\s\S]*$/, '');
-  return runInNewContext(source + '\nApp;', { CloudClient, StorageManager, safeAssetUrl, prepareCover, cloneSnapshot, ...overrides });
+  return runInNewContext(source + '\nApp;', { CloudClient, StorageManager, safeAssetUrl, prepareCover, cloneSnapshot, isExtensionContext, ...overrides });
 }
+
+test('only an owned extension page selects Chrome runtime; a website with chrome globals uses web', () => {
+  const chrome = { runtime: { id: 'abcdefghijklmnopabcdefghijklmnop', sendMessage() {} } };
+  assert.equal(isExtensionContext({ location: { protocol: 'chrome-extension:' }, chrome }), true);
+  assert.equal(isExtensionContext({ location: { protocol: 'https:' }, chrome }), false);
+  assert.equal(isExtensionContext({ location: { protocol: 'chrome-extension:' }, chrome: { runtime: { sendMessage() {} } } }), false);
+  assert.equal(isExtensionContext({ location: { protocol: 'https:' } }), false);
+});
+
+test('extension transport unwraps the same data and quota errors as web protocol', async () => {
+  const oldLocation = globalThis.location;
+  const oldChrome = globalThis.chrome;
+  const sent = [];
+  globalThis.location = { protocol: 'chrome-extension:' };
+  globalThis.chrome = { runtime: { id: 'test-extension', sendMessage(message, callback) {
+    sent.push(message);
+    if (message.action === 'cloud_status') callback({ success: true, data: { connected: false } });
+    else callback({ success: false, code: 'RATE_LIMIT', error: 'Espera al contador', rateLimit: { remaining: 0, limit: 120 } });
+  } } };
+  try {
+    assert.deepEqual(await runtimeRequest('cloud_status', { projectRef: 'abcdefghijklmnopqrst', libraryId: 'test-library' }), { connected: false });
+    await assert.rejects(runtimeRequest('save_cloud', {}), error => error.code === 'RATE_LIMIT' && error.rateLimit.remaining === 0);
+    assert.equal(sent[0].action, 'cloud_status');
+    assert.equal(sent[0].libraryId, 'test-library');
+  } finally {
+    if (oldLocation === undefined) delete globalThis.location; else globalThis.location = oldLocation;
+    if (oldChrome === undefined) delete globalThis.chrome; else globalThis.chrome = oldChrome;
+  }
+});
+
+test('web transport without IndexedDB rejects persistent storage without invoking Chrome or HTTP', async () => {
+  const previous = { location: globalThis.location, chrome: globalThis.chrome, fetch: globalThis.fetch };
+  let calls = 0;
+  globalThis.location = { protocol: 'https:' };
+  globalThis.chrome = { runtime: { id: 'unrelated-extension', sendMessage() { throw new Error('Website must not call extension API'); } } };
+  globalThis.fetch = async () => { calls++; throw new Error('Status must not use HTTP'); };
+  try {
+    await assert.rejects(runtimeRequest('cloud_status', { projectRef: 'abcdefghijklmnopqrst', libraryId: '00000000-0000-0000-0000-000000000001' }), { code: 'STORAGE' });
+    assert.equal(calls, 0);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+});
+
+test('Fish metadata uses the shared transport and works without Chrome globals', async () => {
+  const App = await appHarness();
+  const app = Object.create(App.prototype);
+  app.metadataRequests = new Map();
+  const calls = [];
+  app.cloud = {
+    identity: () => ({ projectRef: 'abcdefghijklmnopqrst', libraryId: 'test-library' }),
+    request: async (action, payload) => {
+      calls.push({ action, payload });
+      return { title: 'Voz de prueba', samples: [{ audio: 'https://public-platform.r2.fish.audio/sample.mp3' }], cover_image: 'cover.png' };
+    }
+  };
+  const result = await app.fetchFishAudioInfo('0123456789abcdef0123456789abcdef');
+  assert.equal(result.title, 'Voz de prueba');
+  assert.equal(result.sampleAudio, 'https://public-platform.r2.fish.audio/sample.mp3');
+  assert.equal(calls[0].action, 'resolve_fish_audio');
+  assert.equal(calls[0].payload.libraryId, 'test-library');
+  assert.equal(app.metadataRequests.size, 0);
+});
 
 test('queued saves capture immutable copies and advance revisions serially', async () => {
   const calls = [];
@@ -43,6 +108,50 @@ test('queued saves capture immutable copies and advance revisions serially', asy
   assert.deepEqual(calls.map(call => call.data.voices[0].title), ['Primero', 'Segundo']);
   assert.deepEqual(calls.map(call => call.data.settings.showSidebarFolders), [true, false]);
   assert.equal(client.revision, 5); assert.equal(client.pending, 0); assert.equal(client.unsaved, false);
+});
+
+test('startup restore adopts remembered advanced IDs before loading, without returning a token', async () => {
+  const remembered = { projectRef: 'zyxwvutsrqponmlkjihg', libraryId: 'remembered-library' };
+  const calls = [];
+  const client = new CloudClient(async (action, payload) => {
+    calls.push({ action, payload });
+    if (action === 'restore_cloud') return { connected: true, ...remembered };
+    return { ...fixture(7), ...remembered, snapshot: { ...fixture(7).snapshot, libraryId: remembered.libraryId } };
+  });
+  client.projectRef = 'abcdefghijklmnopqrst'; client.libraryId = 'default-library';
+  const restored = await client.restore();
+  assert.equal(restored.token, undefined);
+  assert.equal(client.connected, false);
+  assert.deepEqual(client.identity(), remembered);
+  await client.load();
+  assert.equal(client.connected, true);
+  assert.equal(client.revision, 7);
+  assert.equal(calls[0].action, 'restore_cloud');
+  assert.equal(calls[0].payload, undefined);
+  assert.deepEqual(calls[1].payload, remembered);
+  await assert.rejects(client.restore(), { code: 'PENDING' });
+});
+
+test('logout invalidates a delayed remembered-session restoration', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const client = new CloudClient(async action => {
+    if (action === 'restore_cloud') { await gate; return { connected: true, projectRef: 'abcdefghijklmnopqrst', libraryId: 'old-library' }; }
+    return {};
+  });
+  const restore = client.restore();
+  await client.disconnect(); release();
+  await assert.rejects(restore, { code: 'NOT_CONNECTED' });
+  assert.equal(client.projectRef, null);
+  assert.equal(client.libraryId, null);
+});
+
+test('remembered-session restoration cannot replace pending local edits', async () => {
+  let requests = 0;
+  const client = new CloudClient(async () => { requests++; return { connected: false }; });
+  client.unsaved = true;
+  await assert.rejects(client.restore(), { code: 'PENDING' });
+  assert.equal(requests, 0);
 });
 
 test('conflict retains latest local snapshot and prevents blind overwrite or refresh', async () => {

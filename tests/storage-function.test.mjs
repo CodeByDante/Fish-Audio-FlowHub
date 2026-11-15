@@ -248,6 +248,18 @@ test('CORS supports extension origins, optional pinning and originless backgroun
   assert.equal(absent.status, 405);
 });
 
+test('CORS allows only the exact standalone GitHub Pages origin, never lookalikes or subdomains', async () => {
+  const handle = createHandler({ env: ENV });
+  const preflight = await handle(new Request('https://example.com/', { method: 'OPTIONS', headers: { Origin: 'https://codebydante.github.io' } }));
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), 'https://codebydante.github.io');
+  for (const origin of ['https://codebydante.github.io.evil.example', 'http://codebydante.github.io', 'https://other.github.io', 'https://preview.codebydante.github.io', 'null']) {
+    const response = await handle(new Request('https://example.com/', { method: 'OPTIONS', headers: { Origin: origin } }));
+    assert.equal(response.status, 403, origin);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), null, origin);
+  }
+});
+
 test('Management reset header is seconds remaining, with estimates only when headers are missing', () => {
   const rate = quotaFromHeaders(new Headers(quotaHeaders()), 200, NOW);
   assert.equal(rate.resetAt, NOW + 37000);

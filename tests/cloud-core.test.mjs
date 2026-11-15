@@ -4,6 +4,15 @@ import { readFile } from 'node:fs/promises';
 // Import as a data module so the buildless extension needs no package.json.
 const source = await readFile(new URL('../src/js/cloud-core.js', import.meta.url), 'utf8');
 const core = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+const coreModuleUrl='data:text/javascript;base64,'+Buffer.from(source).toString('base64');
+const engineSource=(await readFile(new URL('../src/js/cloud-engine.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify(coreModuleUrl));
+const engineModuleUrl='data:text/javascript;base64,'+Buffer.from(engineSource).toString('base64');
+const persistentSource=(await readFile(new URL('../src/js/persistent-storage.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify(coreModuleUrl));
+const persistentModuleUrl='data:text/javascript;base64,'+Buffer.from(persistentSource).toString('base64');
+const persistentTestShim='data:text/javascript;base64,'+Buffer.from(`export function createPersistentStorage(){const state=new Map();return {async get(key){return {[key]:structuredClone(state.get(key))};},async set(values){for(const [key,value]of Object.entries(values))state.set(key,structuredClone(value));},async remove(key){state.delete(key);}};}`).toString('base64');
+
+async function backgroundSource(){return (await readFile(new URL('../src/js/background.js',import.meta.url),'utf8')).replace("'./cloud-engine.js'",JSON.stringify(engineModuleUrl)).replace("'./persistent-storage.js'",JSON.stringify(persistentTestShim));}
+
 const libraryId = 'b2e96ef0-0b4a-498c-8a28-4949574ae190';
 const fixture = () => ({ folders:[{id:'all',name:'Todas'},{id:'f_favorites',name:'Favoritas'},{id:'f_sueltas',name:'Voces Sueltas'},{id:'custom',name:'Voces'}], voices:[{id:'v_1',title:'Voz',url:'https://fish.audio/m/abcdefgh/',audioUrl:'',coverImage:'',folderId:'custom',isFavorite:true,extra:{keep:true}}], settings:{showSidebarFolders:true} });
 test('SQL stays fixed and malicious text is only a parameter', () => {
@@ -38,7 +47,7 @@ test('connection only accepts identifiers and a bounded token', () => {
   const value=core.validateConnection({token:'test_only_12345678901234567890',projectRef:'ktcjeltckzdeetucfplw',libraryId});
   assert.equal(value.libraryId,libraryId);
 });
-test('background rejects external senders, keeps PAT in session only and sanitizes conflicts', async () => {
+test('background rejects external senders, restricts PAT to its storage adapter and sanitizes conflicts', async () => {
   const saved = {};
   let listener;
   const extensionId = 'vault-test-extension';
@@ -76,8 +85,7 @@ test('background rejects external senders, keeps PAT in session only and sanitiz
       : { ok: true, status: 201, headers, text: async () => JSON.stringify([{ snapshot: { ...snapshot, revision: 1, libraryId } }]) };
   };
   try {
-    const background = (await readFile(new URL('../src/js/background.js', import.meta.url), 'utf8'))
-      .replace("'./cloud-core.js'", JSON.stringify('data:text/javascript;base64,' + Buffer.from(source).toString('base64')));
+    const background = (await backgroundSource());
     await import('data:text/javascript;base64,' + Buffer.from(background).toString('base64'));
     const send = (request, sender = { id: extensionId, url: origin + 'index.html' }) => new Promise(resolve => listener({projectRef:'ktcjeltckzdeetucfplw',libraryId,...request}, sender, resolve));
     const forbidden = await send({action:'cloud_status'}, {id:'another-extension', url:'https://evil.example/'});
@@ -199,7 +207,7 @@ test('background batches private cover signing, caches URLs and uploads without 
     return response(request.action==='sign'?{success:true,images:request.paths.map(signed),rateLimit}:{success:true,...signed(secondPath),rateLimit});
   };
   try {
-    const background=(await readFile(new URL('../src/js/background.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(source).toString('base64')))+'\n// Cover integration test isolation';
+    const background=(await backgroundSource())+'\n// Cover integration test isolation';
     await import('data:text/javascript;base64,'+Buffer.from(background).toString('base64'));
     const send=request=>new Promise(resolve=>listener({projectRef:'ktcjeltckzdeetucfplw',libraryId,...request},{id:extensionId,url:origin+'index.html'},resolve));
     const connected=await send({action:'connect_cloud',token:'test_only_12345678901234567890',projectRef:'ktcjeltckzdeetucfplw',libraryId});
@@ -244,7 +252,7 @@ test('a stale tab cannot read, overwrite, disconnect or upload into another tab 
     return {ok:true,status:200,headers:new Headers(),text:async()=>JSON.stringify([{snapshot}])};
   };
   try {
-    const background=(await readFile(new URL('../src/js/background.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(source).toString('base64')))+'\n// Session identity test isolation';
+    const background=(await backgroundSource())+'\n// Session identity test isolation';
     await import('data:text/javascript;base64,'+Buffer.from(background).toString('base64'));
     const send=(request,identity=identityA)=>new Promise(resolve=>listener({...identity,...request},{id:extensionId,url:origin+'index.html'},resolve));
     const token='test_only_12345678901234567890';
@@ -309,7 +317,7 @@ for(const scenario of ['compatible','empty','missing-library','seed-race','archi
       return response([{snapshot}]);
     };
     try{
-      const background=(await readFile(new URL('../src/js/background.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(source).toString('base64')))+`\n// Bootstrap ${scenario} test isolation`;
+      const background=(await backgroundSource())+`\n// Bootstrap ${scenario} test isolation`;
       await import('data:text/javascript;base64,'+Buffer.from(background).toString('base64'));
       const send=request=>new Promise(resolve=>listener({projectRef:'ktcjeltckzdeetucfplw',libraryId,...request},{id:extensionId,url:origin+'index.html'},resolve));
       const result=await send({action:'connect_cloud',token:'test_only_12345678901234567890',query:'DROP TABLE public.voices'});
@@ -329,3 +337,73 @@ for(const scenario of ['compatible','empty','missing-library','seed-race','archi
     }finally{globalThis.chrome=previousChrome;globalThis.fetch=previousFetch;}
   });
 }
+const {createCloudEngine}=await import(engineModuleUrl);
+const webSource=(await readFile(new URL('../src/js/web-transport.js',import.meta.url),'utf8')).replace("'./cloud-engine.js'",JSON.stringify(engineModuleUrl)).replace("'./persistent-storage.js'",JSON.stringify(persistentModuleUrl));
+const {createWebTransport}=await import('data:text/javascript;base64,'+Buffer.from(webSource).toString('base64'));
+function memoryAdapter(){const state=new Map();return {async get(key){return {[key]:structuredClone(state.get(key))};},async set(values){for(const [key,value]of Object.entries(values))state.set(key,structuredClone(value));},async remove(key){state.delete(key);}};}
+test('web and extension share one library with revision conflicts instead of overwrites',async()=>{
+  const identity={projectRef:'ktcjeltckzdeetucfplw',libraryId};
+  const token='test_only_12345678901234567890';
+  let database={...fixture(),...identity,revision:1};let globalCalls=0;let relayCalls=0;let directCalls=0;let fishCredentials;
+  const response=(body,status=200)=>({ok:status<400,status,headers:new Headers({'X-RateLimit-Limit':'120','X-RateLimit-Remaining':String(120-globalCalls),'X-RateLimit-Reset':'30','X-Vault-Management-Requests':'1'}),text:async()=>JSON.stringify(body),json:async()=>body});
+  const fetchImpl=async(url,options)=>{
+    if(url.startsWith('https://api.fish.audio/')){fishCredentials=options.credentials;return response({title:'Fish',audioUrl:'https://example.test/sample.mp3'});}
+    globalCalls++;
+    assert.match(options.headers.Authorization,/^Bearer test_only_/);
+    assert.equal(options.credentials,'omit');
+    const body=JSON.parse(options.body);let operation,data,expectedVersion;
+    if(url===`https://${identity.projectRef}.supabase.co/functions/v1/voice-vault-api`){
+      relayCalls++;operation=body.operation;data=body.data;expectedVersion=body.expectedVersion;
+      assert.equal(body.libraryId,libraryId);assert.equal(body.query,undefined);assert.equal(body.token,undefined);
+      assert.doesNotMatch(options.body,/vault_apply_snapshot|SELECT public|test_only_/,'web requests expose only fixed operation names and data');
+    }else{
+      directCalls++;assert.equal(url,`https://api.supabase.com/v1/projects/${identity.projectRef}/database/query`);
+      operation=body.query===core.SCHEMA_PROBE_SQL?'probe':body.query===core.QUERIES.load?'load':body.query===core.QUERIES.save?'save':'unknown';
+      if(operation==='save'){data=JSON.parse(body.parameters[2]);expectedVersion=body.parameters[1];}
+    }
+    if(operation==='probe')return response([{schema_state:{state:'compatible'}}]);
+    if(operation==='load')return response([{snapshot:structuredClone(database)}]);
+    assert.equal(operation,'save');
+    if(expectedVersion!==database.revision)return response({code:'CONFLICT',error:'A newer version exists'},409);
+    database={...structuredClone(data),libraryId,revision:database.revision+1};
+    return response([{snapshot:structuredClone(database)}]);
+  };
+  const oldLocal=globalThis.localStorage;const oldSession=globalThis.sessionStorage;
+  globalThis.localStorage={getItem(){throw Error('Persistent web storage forbidden');},setItem(){throw Error('Persistent web storage forbidden');}};
+  globalThis.sessionStorage={getItem(){throw Error('PAT must remain in memory');},setItem(){throw Error('PAT must remain in memory');}};
+  try{
+    const web=createWebTransport({storage:memoryAdapter(),fetchImpl,assetUrl:path=>`https://codebydante.github.io/fish-audio-vault-online/${path}`});
+    const extension=createCloudEngine({storage:memoryAdapter(),fetchImpl,assetUrl:path=>`chrome-extension://test/${path}`});
+    const ext=(action,payload={})=>extension.request({...identity,...payload,action});
+    assert.equal((await web('connect_cloud',{token,...identity})).success,true);
+    assert.equal((await ext('connect_cloud',{token})).success,true);
+    const webData=fixture();webData.voices[0].title='Editado desde web';
+    const webSaved=await web('save_cloud',{...identity,data:webData,expectedVersion:1});
+    assert.equal(webSaved.data.revision,2);
+    assert.equal((await ext('save_cloud',{data:fixture(),expectedVersion:1})).code,'CONFLICT');
+    const extensionLoaded=await ext('load_cloud');
+    assert.equal(extensionLoaded.data.snapshot.voices[0].title,'Editado desde web');
+    const extensionData=structuredClone(extensionLoaded.data.snapshot);extensionData.voices[0].notes='Editado desde extensión';
+    assert.equal((await ext('save_cloud',{data:extensionData,expectedVersion:2})).data.revision,3);
+    const webLoaded=await web('load_cloud',identity);
+    assert.equal(webLoaded.data.snapshot.voices[0].notes,'Editado desde extensión');
+    assert.equal(webLoaded.data.revision,3);
+    assert.ok(relayCalls>0&&directCalls>0);
+    const freshPage=createWebTransport({storage:memoryAdapter(),fetchImpl,assetUrl:path=>`https://codebydante.github.io/fish-audio-vault-online/${path}`});
+    const before=globalCalls;
+    assert.equal((await freshPage('cloud_status',identity)).data.connected,false,'new page must not inherit the prior PAT');
+    assert.equal((await freshPage('load_cloud',identity)).code,'NOT_CONNECTED');
+    assert.equal(globalCalls,before,'new disconnected page performs no API requests');
+    const fish=await web('resolve_fish_audio',{...identity,modelId:'abcdefgh'});
+    assert.equal(fish.success,true);assert.equal(fishCredentials,'omit','public Fish request must not require browser cookies');
+    await web('disconnect_cloud',identity);
+    assert.equal((await web('cloud_status',identity)).data.connected,false);
+    assert.equal((await ext('cloud_status')).data.connected,true,'web disconnect cannot close the extension session');
+    assert.doesNotMatch(JSON.stringify(webLoaded),/test_only_/);
+  }finally{globalThis.localStorage=oldLocal;globalThis.sessionStorage=oldSession;}
+});
+test('relay failures before upstream authorization consume zero Management requests',async()=>{
+  const web=createWebTransport({storage:memoryAdapter(),assetUrl:path=>'https://example.test/'+path,fetchImpl:async()=>({ok:false,status:403,headers:new Headers({'X-Vault-Management-Requests':'0'}),text:async()=>JSON.stringify({code:'AUTH',error:'Denied'})})});
+  const result=await web('connect_cloud',{token:'test_only_12345678901234567890',projectRef:'ktcjeltckzdeetucfplw',libraryId});
+  assert.equal(result.code,'AUTH');assert.equal(result.rateLimit.requestsThisSession,0);
+});

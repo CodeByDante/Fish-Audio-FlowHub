@@ -33,10 +33,14 @@ function projectConfig(env) {
 function requestOrigin(request, env) {
   const origin = request.headers.get('Origin');
   if (!origin) return null;
+  // The standalone Pages app is trusted by exact origin only, never a suffix,
+  // wildcard, preview domain or a caller-supplied website allowlist.
+  if (origin === 'https://codebydante.github.io') return origin;
   const id = origin.match(/^chrome-extension:\/\/([a-p]{32})$/)?.[1];
   if (!id) throw new RequestError('FORBIDDEN', 'Origen no autorizado.', 403);
   // A fixed unpacked-extension ID can be pinned with this optional runtime env.
-  // Without it only Chrome extension origins (never websites) reach PAT validation.
+  // Without it Chrome extension origins plus the exact Pages origin above may
+  // reach PAT validation. Other website origins are always rejected.
   const trusted = String(envValue(env, 'VOICE_VAULT_EXTENSION_IDS') || '').split(',').map(value => value.trim()).filter(Boolean);
   if (trusted.length && !trusted.includes(id)) throw new RequestError('FORBIDDEN', 'Extensión no autorizada.', 403);
   return origin;

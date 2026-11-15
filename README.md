@@ -2,9 +2,17 @@
 
 <img src="images/icon128.png" width="72" height="72" alt="Logo Fish Audio Voice Vault Online">
 
-Extensión de Chrome que conserva la interfaz negra y las herramientas de [Fish Audio Vault](https://github.com/CodeByDante/fish-audio-vault), con biblioteca online en Supabase. Se abre en una pestaña completa y conecta mediante tu token personal de administración. No necesita el antiguo servidor local ni Firebase.
+Aplicación web y extensión de Chrome que conservan la interfaz negra de [Fish Audio Vault](https://github.com/CodeByDante/fish-audio-vault), con una biblioteca compartida en Supabase. Ambas conectan mediante tu token personal de administración. No necesitan el antiguo servidor local ni Firebase.
 
-## Instalar
+## Abrir la web
+
+[**Abrir Fish Audio Vault Online en GitHub Pages**](https://codebydante.github.io/fish-audio-vault-online/)
+
+Introduce tu token para cargar la misma biblioteca de la extensión. Los cambios guardados en cualquiera de las dos aparecen en la otra al actualizar o durante la consulta periódica de 15 segundos, mientras la interfaz esté visible e inactiva. La reproducción no guarda la biblioteca.
+
+La sesión se recuerda en este navegador hasta pulsar **Cerrar sesión**, tanto en la web como en la extensión. El token se cifra localmente con AES-GCM en IndexedDB, usando una clave Web Crypto no extraíble. No se publica en GitHub, URLs ni cookies y no se sincroniza con Chrome Sync. Al cerrar sesión se elimina la conexión guardada y su caché de portadas. Si el token caduca o lo revocas, tendrás que conectar uno válido.
+
+## Instalar la extensión
 
 1. Descarga el ZIP de **Assets** en la [última versión](https://github.com/CodeByDante/fish-audio-vault-online/releases/latest) y descomprímelo.
 2. Abre `chrome://extensions` y activa **Modo de desarrollador**.
@@ -13,7 +21,7 @@ Extensión de Chrome que conserva la interfaz negra y las herramientas de [Fish 
 
 El proyecto y la biblioteca de esta instalación vienen configurados en `config.json`. Son identificadores públicos, sin credenciales. La base preparada contiene **118 voces, 14 carpetas y 3 favoritos**. Los datos personales y el archivo de importación no se publican en este repositorio.
 
-El token permanece en `chrome.storage.session`, restringido a los contextos internos de la extensión. Se borra al cerrar Chrome, cerrar sesión o recargar/desactivar la extensión. No se guarda en el código, `localStorage` ni sincronización de Chrome. Usa un token nuevo si compartiste el anterior en un chat o captura.
+La extensión también recuerda la sesión mediante almacenamiento local cifrado. Tras la primera conexión podrás recargarla o volver a abrirla sin pegar el token otra vez. **Cerrar sesión** elimina las credenciales guardadas. Usa un token nuevo si compartiste el anterior en un chat o captura.
 
 ## Herramientas
 
@@ -35,6 +43,8 @@ Las portadas nuevas se suben al bucket privado `voice-vault-images`. Se aceptan 
 
 El nombre del archivo usa SHA-256: volver a subir exactamente la misma imagen reutiliza su objeto. Al reemplazar o quitar una portada se conserva el objeto anterior; no hay borrado físico automático. Los archivos antiguos pueden limpiarse manualmente desde Storage cuando ya no se necesiten. El límite de 512 KiB es por imagen, no una medición del espacio total del plan.
 
+En la web se consultan muestras públicas de Fish Audio sin leer cookies de otras páginas. Los modelos que exigen una sesión de Fish Audio pueden necesitar la extensión, que puede usar la sesión de su navegador cuando el servicio lo permite.
+
 Los audios se reproducen desde sus enlaces de Fish Audio; no se guardan archivos de audio en Supabase. Reproducir, pausar o renovar un enlace de muestra no guarda la biblioteca ni consume peticiones de Supabase. Los enlaces renovados se reutilizan en una caché temporal de la sesión; se borran al salir o cambiar de biblioteca. La consulta periódica de sincronización se cuenta por separado. La extensión puede consultar el modelo de Fish Audio para renovar una muestra, usando la sesión del propio navegador cuando el servicio lo permita. Los permisos y disponibilidad de Fish Audio siguen siendo necesarios.
 
 ## Contador de API
@@ -44,7 +54,7 @@ Según la [documentación de Supabase](https://supabase.com/docs/reference/api/i
 - Leer las 118 voces juntas consume **una petición**, no 118.
 - Cada guardado de una edición consume una petición. Escuchar o renovar una muestra de Fish Audio no guarda datos en Supabase.
 - Subir o firmar un lote de imágenes hace una consulta adicional para autorizar el token; también se cuenta.
-- La firma de portadas se reutiliza mientras sea válida.
+- La firma de portadas se reutiliza mientras sea válida, incluso después de recargar. Abrir una sesión recordada o pulsar Actualizar normalmente hace una sola lectura de la biblioteca; renovar firmas vencidas cuenta aparte.
 - El reloj y las consultas internas del indicador no hacen llamadas HTTP.
 - Fish Audio tiene su propia API y no consume este contador.
 
@@ -54,7 +64,7 @@ Un `429` pausa las peticiones hasta el reinicio. El indicador no garantiza mostr
 
 Es una herramienta personal de administración. El token maestro tiene los permisos de tu cuenta; no es una clave pública para distribuir entre usuarios. Cada instalación debe usar un token autorizado para su proyecto. No introduzcas una clave `service_role` ni la contraseña PostgreSQL.
 
-El service worker hace consultas SQL fijas y parametrizadas mediante Management API. Las funciones `vault_export_snapshot` y `vault_apply_snapshot` solo están disponibles para `postgres`. El guardado completo es transaccional, comprueba la revisión y conserva campos adicionales importados.
+El service worker de Chrome y la versión web comparten el mismo motor. La extensión llama a Management API directamente; GitHub Pages utiliza la Edge Function `voice-vault-api`, que recibe únicamente operaciones permitidas, construye SQL fijo y valida el PAT contra el proyecto. El relay nunca guarda tokens y no necesita una clave de servicio. Ambas modalidades usan las mismas revisiones de Supabase para impedir sobrescrituras. Las funciones `vault_export_snapshot` y `vault_apply_snapshot` solo están disponibles para `postgres`. El guardado completo es transaccional, comprueba la revisión y conserva campos adicionales importados.
 
 Tablas: `libraries`, `folders`, `voices` y `user_settings`. RLS está activado; la biblioteca personal no tiene propietario Auth y no se expone a los roles públicos de Data API. Los ajustes de esta modalidad administrativa se guardan en los metadatos de la biblioteca. Los borrados de voces/carpetas son archivados recuperables por un administrador.
 
@@ -75,7 +85,7 @@ Esta revisión usa consultas API y se incluye en el contador. La creación solo 
 
 Para usar otro proyecto, abre **Proyecto y biblioteca** en la pantalla de conexión e introduce su referencia y un UUID de biblioteca. El token debe tener permisos en ese proyecto. Conserva un respaldo antes de importar datos.
 
-La instalación preconfigurada ya tiene el servicio de imágenes desplegado. En un proyecto diferente, las portadas requieren desplegar `supabase/functions/voice-vault-storage/index.ts` con `verify_jwt = false`; utiliza únicamente las variables privadas del runtime de Supabase. La preparación automática de tablas no copia credenciales ni despliega servicios externos.
+La instalación preconfigurada ya tiene el servicio de imágenes desplegado. En otro proyecto, las portadas requieren `voice-vault-storage` y la web requiere `voice-vault-api`. Antes de desplegar esta última, ejecuta `python3 scripts/prepare_edge_api.py`: prepara copias exactas del protocolo y del SQL canónico. Despliega ambas con `verify_jwt = false`; los handlers validan el PAT y utilizan únicamente las variables privadas del runtime. La preparación automática de tablas no copia credenciales ni despliega servicios externos. Los orígenes web de las funciones se limitan a `https://codebydante.github.io`; adapta ese origen si alojas tu propia copia en otro dominio.
 
 Los archivos de `database/` documentan el esquema y contienen las verificaciones transaccionales, que terminan con `ROLLBACK`.
 
@@ -87,10 +97,13 @@ Sin dependencias npm:
 npm run check
 npm test
 npm run package
+npm run build:pages
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.1.0.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.2.0.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
-La extensión se instala en Chrome; abrir `index.html` como una web normal no proporciona el service worker ni la API `chrome.storage.session`.
+`npm run build:pages` genera `dist/pages` usando una lista explícita de archivos públicos. `.github/workflows/pages.yml` comprueba y publica ese directorio en GitHub Pages al actualizar `main`. GitHub Actions publica el código; los datos se sincronizan a través de Supabase, no de commits.
+
+La web se sirve por HTTPS. En Chrome, el mismo código detecta su contexto de extensión y utiliza su service worker. No hacen falta credenciales en GitHub Actions.
 
 Interfaz y herramientas adaptadas de `CodeByDante/fish-audio-vault`, referencia de origen `8cecd961811a018b44b4879698ed3a2ae8c46aaf`. El repositorio original permanece independiente.

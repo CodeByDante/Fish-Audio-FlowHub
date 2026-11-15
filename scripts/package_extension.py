@@ -14,7 +14,7 @@ files = [root / name for name in ('manifest.json', 'index.html', 'config.json')]
 for directory in ('src', 'images'):
     files.extend(p for p in (root / directory).rglob('*') if p.is_file() and not p.is_symlink())
 files.sort(key=lambda p: p.relative_to(root).as_posix())
-required = ('src/js/background.js', 'src/js/app.js', 'src/js/cloud-core.js', 'src/js/cloud-client.js', 'src/js/storage.js', 'src/styles/main.css', 'src/sql/bootstrap.sql')
+required = ('src/js/background.js', 'src/js/app.js', 'src/js/cloud-core.js', 'src/js/cloud-client.js', 'src/js/storage.js', 'src/styles/main.css', 'src/sql/bootstrap.sql', 'src/js/cloud-engine.js', 'src/js/web-transport.js', 'src/js/persistent-storage.js')
 for name in required:
     if root / name not in files:
         raise SystemExit('Falta archivo requerido: ' + name)

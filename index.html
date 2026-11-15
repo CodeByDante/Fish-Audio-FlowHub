@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.supabase.com https://*.supabase.co https://api.fish.audio https://public-platform.r2.fish.audio; img-src 'self' data: blob: https:; media-src https: blob: data:; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Tu biblioteca personal de voces Fish Audio, sincronizada con Supabase desde la web o la extensión.">
   <title>Fish Audio - Voice Vault</title>
   <link rel="icon" type="image/png" href="images/icon48.png">
   <link rel="stylesheet" href="src/styles/main.css">
@@ -354,7 +357,7 @@
         <div class="form-group">
           <label for="cloudTokenInput">Token personal de Supabase</label>
           <input type="password" id="cloudTokenInput" class="form-control" placeholder="sbp_…" required autocomplete="off" spellcheck="false" autocapitalize="off">
-          <p class="cloud-login-hint">Se conserva solo en la sesión de la extensión y se elimina al cerrar el navegador o cerrar sesión.</p>
+          <p class="cloud-login-hint" id="cloudTokenHint">La sesión se recuerda en este navegador hasta que pulses Cerrar sesión.</p>
         </div>
         <details class="cloud-advanced"><summary>Proyecto y biblioteca</summary>
           <div class="form-group"><label for="cloudProjectInput">Referencia del proyecto</label><input type="text" id="cloudProjectInput" class="form-control" required pattern="[a-z0-9]{20}" autocomplete="off" spellcheck="false"></div>

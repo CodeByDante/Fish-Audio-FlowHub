@@ -15,3 +15,7 @@ revision_*/
 *.log
 *.pem
 *.key
+
+# Generated exact protocol copies staged for the Edge API bundle.
+supabase/functions/voice-vault-api/cloud-core.js
+supabase/functions/voice-vault-api/bootstrap-sql.js
