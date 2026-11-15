@@ -451,12 +451,12 @@ class App {
     // Folder Scroll Controls (Arrows, Wheel & Drag)
     if (this.scrollFoldersLeft) {
       this.scrollFoldersLeft.addEventListener('click', () => {
-        if (this.folderTabsWrapper) this.folderTabsWrapper.scrollBy({ left: -180, behavior: 'smooth' });
+        if (this.folderTabsWrapper) this.folderTabsWrapper.scrollBy({ left: -180, behavior: this.motionReduced() ? 'auto' : 'smooth' });
       });
     }
     if (this.scrollFoldersRight) {
       this.scrollFoldersRight.addEventListener('click', () => {
-        if (this.folderTabsWrapper) this.folderTabsWrapper.scrollBy({ left: 180, behavior: 'smooth' });
+        if (this.folderTabsWrapper) this.folderTabsWrapper.scrollBy({ left: 180, behavior: this.motionReduced() ? 'auto' : 'smooth' });
       });
     }
 
@@ -1549,6 +1549,10 @@ class App {
     return groups;
   }
 
+  motionReduced() {
+    return globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  }
+
   render() {
     if (!this.voicesList) return;
     const query = this.searchInput ? this.searchInput.value.toLowerCase() : '';
@@ -1567,6 +1571,13 @@ class App {
     });
 
     const groups = this.groupFilteredVoices(filtered);
+    // Only entering cards and deliberate folder/order changes get an entrance.
+    // Selection, playback and refreshed cover URLs must not replay the whole list.
+    const motionView = `${this.activeFolderId}:${this.sortOrder}`;
+    const viewChanged = this.motionView !== motionView;
+    const previousGroups = this.motionGroups || new Set();
+    this.motionView = motionView;
+    this.motionGroups = new Set(groups.map(group => group.baseName.toLowerCase()));
 
     if (this.totalCountEl) {
       this.totalCountEl.textContent = `${filtered.length} voces`;
@@ -1581,14 +1592,17 @@ class App {
     if (this.emptyState) this.emptyState.style.display = 'none';
     this.voicesList.innerHTML = '';
 
-    groups.forEach(group => {
-      if (group.voices.length === 1) {
-        const el = this.createCardElement(group.voices[0]);
-        this.voicesList.appendChild(el);
-      } else {
-        const el = this.createGroupCard(group);
-        this.voicesList.appendChild(el);
+    groups.forEach((group, index) => {
+      const el = group.voices.length === 1
+        ? this.createCardElement(group.voices[0])
+        : this.createGroupCard(group);
+      // Bound the cascade so large libraries remain responsive. Search results
+      // appear without a stagger, keeping typing immediate.
+      if (index < 12 && (viewChanged || !previousGroups.has(group.baseName.toLowerCase()))) {
+        el.classList.add('flow-card-enter');
+        el.style.setProperty('--flow-delay', `${query ? 0 : Math.min(index, 5) * 24}ms`);
       }
+      this.voicesList.appendChild(el);
     });
   }
 
@@ -1633,18 +1647,20 @@ class App {
 
     const toggleBtn = mainCard.querySelector('.expand-group-btn');
     if (toggleBtn) {
+      let collapseTimer;
       toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        clearTimeout(collapseTimer);
         const isExpanded = subContainer.style.display !== 'none' && !subContainer.classList.contains('collapsing');
 
         if (isExpanded) {
           toggleBtn.classList.remove('expanded');
           toggleBtn.setAttribute('title', `Desplegar otras versiones (${groupVoices.length} versiones)`);
           subContainer.classList.add('collapsing');
-          setTimeout(() => {
+          collapseTimer = setTimeout(() => {
             subContainer.style.display = 'none';
             subContainer.classList.remove('collapsing');
-          }, 290);
+          }, this.motionReduced() ? 0 : 180);
         } else {
           subContainer.style.display = 'flex';
           subContainer.classList.remove('collapsing');
