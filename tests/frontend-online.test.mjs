@@ -110,18 +110,23 @@ test('queued saves capture immutable copies and advance revisions serially', asy
   assert.equal(client.revision, 5); assert.equal(client.pending, 0); assert.equal(client.unsaved, false);
 });
 
-test('startup restore adopts remembered advanced IDs before loading, without returning a token', async () => {
+test('cache-missing startup adopts remembered IDs but waits for an explicit load', async () => {
   const remembered = { projectRef: 'zyxwvutsrqponmlkjihg', libraryId: 'remembered-library' };
   const calls = [];
   const client = new CloudClient(async (action, payload) => {
     calls.push({ action, payload });
-    if (action === 'restore_cloud') return { connected: true, ...remembered };
+    if (action === 'restore_cloud') return { connected: true, cacheAvailable: false, ...remembered };
     return { ...fixture(7), ...remembered, snapshot: { ...fixture(7).snapshot, libraryId: remembered.libraryId } };
   });
   client.projectRef = 'abcdefghijklmnopqrst'; client.libraryId = 'default-library';
   const restored = await client.restore();
   assert.equal(restored.token, undefined);
-  assert.equal(client.connected, false);
+  assert.equal(client.connected, true);
+  assert.equal(client.revision, 0);
+  assert.equal(calls.length, 1);
+  await assert.rejects(client.save(snapshot('No editar sin copia')), { code: 'CACHE_MISSING' });
+  assert.equal(client.unsaved, false);
+  assert.equal(client.pending, 0);
   assert.deepEqual(client.identity(), remembered);
   await client.load();
   assert.equal(client.connected, true);
@@ -130,6 +135,89 @@ test('startup restore adopts remembered advanced IDs before loading, without ret
   assert.equal(calls[0].payload, undefined);
   assert.deepEqual(calls[1].payload, remembered);
   await assert.rejects(client.restore(), { code: 'PENDING' });
+});
+
+test('cached startup and all local timer ticks never load remotely or register visibility refresh', async () => {
+  const calls = [];
+  const intervals = [];
+  const documentEvents = [];
+  const windowEvents = [];
+  const cached = { ...fixture(9), connected: true, cacheAvailable: true, cacheUpdatedAt: Date.now() };
+  const client = new CloudClient(async action => {
+    calls.push(action);
+    if (action === 'restore_cloud') return cached;
+    if (action === 'cloud_status') return { connected: true, projectRef: cached.projectRef, libraryId: cached.libraryId };
+    throw new Error('Unexpected remote operation: ' + action);
+  });
+  const App = await appHarness({
+    document: { visibilityState: 'visible', addEventListener: name => documentEvents.push(name) },
+    window: { addEventListener: name => windowEvents.push(name) },
+    setInterval: (callback, delay) => { intervals.push({ callback, delay }); return intervals.length; }
+  });
+  const app = Object.create(App.prototype);
+  app.cloud = client;
+  app.cloudProjectInput = {}; app.cloudLibraryInput = {};
+  const rendered = [];
+  const loginStates = [];
+  app.applyCloudSnapshot = result => rendered.push(result.snapshot);
+  app.showCloudLogin = show => loginStates.push(show);
+  for (const method of ['bindDOM', 'bindEvents', 'bindCloudEvents', 'applySettings', 'renderFolders', 'render', 'loadCloudConfiguration', 'setCloudStatus', 'setCloudNotice', 'renderApiQuota']) app[method] = () => {};
+  await app.init();
+  assert.deepEqual(calls, ['restore_cloud']);
+  assert.equal(client.revision, 9);
+  assert.equal(rendered.length, 1);
+  assert.deepEqual(loginStates, [false]);
+  assert.deepEqual(intervals.map(timer => timer.delay), [1000, 5000]);
+  for (let i = 0; i < 10; i++) for (const timer of intervals) await timer.callback();
+  assert.equal(calls.filter(action => action === 'load_cloud').length, 0);
+  assert.equal(documentEvents.includes('visibilitychange'), false);
+  assert.equal(windowEvents.includes('focus'), false);
+});
+
+test('missing cache keeps the workspace locked and does not query until explicit Actualizar', async () => {
+  const calls = [];
+  const identities = { projectRef: 'abcdefghijklmnopqrst', libraryId: 'test-library' };
+  const client = new CloudClient(async action => {
+    calls.push(action);
+    if (action === 'restore_cloud') return { connected: true, cacheAvailable: false, ...identities };
+    if (action === 'load_cloud') return fixture(8);
+    throw new Error('Unexpected operation');
+  });
+  const buttons = new Map(['cloudRefreshBtn', 'cloudReloadBtn', 'cloudFetchInitialBtn'].map(id => [id, { disabled: false }]));
+  const App = await appHarness({ document: { getElementById: id => buttons.get(id) || null } });
+  const app = Object.create(App.prototype);
+  app.cloud = client; app.coverRefreshIds = new Set(); app.cloudCacheMessage = {};
+  const modes = []; const rendered = [];
+  app.showCloudLogin = (show, cacheMissing = false) => modes.push({ show, cacheMissing });
+  app.applyCloudSnapshot = result => rendered.push(result.snapshot);
+  app.setCloudStatus = () => {}; app.setCloudNotice = () => {};
+  app.reportCloudError = error => { throw error; };
+  await app.checkServerStatus(true);
+  assert.deepEqual(calls, ['restore_cloud']);
+  assert.deepEqual(modes, [{ show: true, cacheMissing: true }]);
+  assert.equal(rendered.length, 0);
+  await assert.rejects(client.save(snapshot('Unsafe empty view')), { code: 'CACHE_MISSING' });
+  assert.equal(client.unsaved, false);
+  await app.refreshCloudManually();
+  assert.deepEqual(calls, ['restore_cloud', 'load_cloud']);
+  assert.equal(rendered.length, 1);
+  assert.equal(client.revision, 8);
+  assert.deepEqual(modes.at(-1), { show: false, cacheMissing: false });
+  assert.equal([...buttons.values()].every(button => !button.disabled), true);
+});
+
+test('expired cover errors only offer manual refresh and never renew or load remotely', async () => {
+  const App = await appHarness();
+  const app = Object.create(App.prototype);
+  app.coverRefreshIds = new Set();
+  app.cloud = { connected: true, pending: 0, unsaved: false, load() { throw new Error('Cover error must not query'); } };
+  const notices = [];
+  app.setCloudNotice = (...args) => notices.push(args);
+  const voice = { id: 'test', coverStoragePath: 'private/path.png' };
+  app.refreshExpiredCover(voice); app.refreshExpiredCover(voice);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0][0], /Pulsa Actualizar/);
+  assert.equal(notices[0][2], true);
 });
 
 test('logout invalidates a delayed remembered-session restoration', async () => {

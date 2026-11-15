@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fish Audio Voice Vault Online",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "minimum_chrome_version": "120",
   "description": "La biblioteca de voces de Fish Audio, con la interfaz original y guardado online en tu Supabase mediante token de administración.",
   "icons": {

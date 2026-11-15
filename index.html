@@ -27,7 +27,7 @@
         </div>
 
         <span class="api-quota" id="apiQuota" title="Cuota de consultas Supabase; compartida entre todos tus tokens.">API —/120 · --:--</span>
-        <button class="btn open-tab-btn" id="cloudRefreshBtn" title="Actualizar desde Supabase" aria-label="Actualizar biblioteca online">
+        <button class="btn open-tab-btn" id="cloudRefreshBtn" title="Actualizar: consultar Supabase y renovar portadas" aria-label="Actualizar biblioteca desde Supabase">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg>
         </button>
         <button class="btn open-tab-btn" id="cloudLogoutBtn" title="Cerrar sesión online" aria-label="Cerrar sesión online">
@@ -127,7 +127,7 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>Fish Audio Vault &bull; Control Personalizado de Voces</p>
+      <p>Fish Audio Vault &bull; Pulsa Actualizar para consultar cambios. Al abrir se usa tu copia guardada.</p>
     </footer>
   </div>
 
@@ -353,6 +353,11 @@
       <div class="brand"><img class="brand-icon" src="images/icon128.png" width="32" height="32" alt=""><h1 class="brand-title">Fish Audio</h1><span class="brand-tag">Voice Vault</span></div>
       <h2 id="cloudLoginTitle">Conecta tu biblioteca online</h2>
       <p>La misma biblioteca de voces y carpetas, disponible en tus equipos. Al conectar se comprueba y prepara su estructura de datos.</p>
+      <div id="cloudCachePanel" class="modal-form" hidden>
+        <p id="cloudCacheMessage" class="cloud-login-hint" role="status"></p>
+        <button type="button" class="btn btn-primary" id="cloudFetchInitialBtn">Actualizar biblioteca</button>
+        <button type="button" class="btn btn-secondary" id="cloudCacheLogoutBtn">Cerrar sesión</button>
+      </div>
       <form id="cloudLoginForm" class="modal-form">
         <div class="form-group">
           <label for="cloudTokenInput">Token personal de Supabase</label>

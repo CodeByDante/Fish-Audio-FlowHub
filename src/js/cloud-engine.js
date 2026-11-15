@@ -9,6 +9,76 @@ let mutationQueue = Promise.resolve();
 let managementQueue = Promise.resolve();
 const signedCoverCache = new Map();
 const COVER_CACHE_KEY='voice_vault_signed_covers';
+const SNAPSHOT_CACHE_KEY='voice_vault_library_snapshot';
+let snapshotWriteQueue=Promise.resolve();
+function snapshotExclusive(operation){
+  const run=()=>globalThis.navigator?.locks?.request
+    ? globalThis.navigator.locks.request('voice-vault-library-snapshot',operation)
+    : operation();
+  const pending=snapshotWriteQueue.then(run,run);
+  snapshotWriteQueue=pending.catch(()=>{});
+  return pending;
+}
+const sameIdentity=(a,b)=>Boolean(a&&b&&a.projectRef===b.projectRef&&a.libraryId===b.libraryId);
+async function removeSnapshotCache(expected=null){
+  return snapshotExclusive(async()=>{const store=await sessionStorage();if(expected&&!sameIdentity((await store.get(SESSION_KEY))[SESSION_KEY],expected))return;await store.remove(SNAPSHOT_CACHE_KEY);});
+}
+function validatedCachedSnapshot(cache,config){
+  if(!cache||cache.schemaVersion!==1||!sameIdentity(cache,config)||!Number.isFinite(cache.updatedAt))return null;
+  try{
+    const decoded=decodeSnapshot([{snapshot:cache.snapshot}]);
+    if(decoded.snapshot.libraryId!==config.libraryId||decoded.revision!==cache.revision)return null;
+    return {...decoded,updatedAt:cache.updatedAt};
+  }catch{return null;}
+}
+async function rememberSnapshot(config,result){
+  return snapshotExclusive(async()=>{
+    const store=await sessionStorage();
+    const current=(await store.get(SESSION_KEY))[SESSION_KEY];
+    if(!sameIdentity(current,config))return false;
+    let previous;
+    try{previous=(await store.get(SNAPSHOT_CACHE_KEY))[SNAPSHOT_CACHE_KEY];}catch{await store.remove(SNAPSHOT_CACHE_KEY);}
+    const validPrevious=validatedCachedSnapshot(previous,config);
+    if(validPrevious&&validPrevious.revision>result.revision)return true;
+    const envelope={schemaVersion:1,projectRef:config.projectRef,libraryId:config.libraryId,revision:result.revision,snapshot:structuredClone(result.snapshot),updatedAt:Date.now()};
+    if(!validatedCachedSnapshot(envelope,config))throw new CloudError('STORAGE','La copia local de la biblioteca no es válida.');
+    await store.set({[SNAPSHOT_CACHE_KEY]:envelope});
+    const after=(await store.get(SESSION_KEY))[SESSION_KEY];
+    if(!sameIdentity(after,config)){await store.remove(SNAPSHOT_CACHE_KEY);return false;}
+    return true;
+  });
+}
+async function cacheRemoteSnapshot(config,result){
+  try{await rememberSnapshot(config,result);return result;}
+  catch{
+    // The remote mutation already succeeded: keep its new revision and report
+    // only the local-cache failure, so retrying cannot overwrite newer data.
+    try{await removeSnapshotCache(config);}catch{}
+    return {...result,cacheWarning:'Los datos están online, pero no se pudo actualizar la copia local. Actualiza manualmente al reabrir la biblioteca.'};
+  }
+}
+async function restoredSnapshot(config){
+  const store=await sessionStorage();let saved;
+  try{saved=(await store.get(SNAPSHOT_CACHE_KEY))[SNAPSHOT_CACHE_KEY];}
+  catch{await removeSnapshotCache(config);return null;}
+  const cached=validatedCachedSnapshot(saved,config);
+  if(!cached)return null;
+  let coverWarning;
+  try{await restoreCoverCache();}catch{coverWarning='No se pudo leer la copia local de las portadas. Puedes actualizarlas manualmente.';}
+  const snapshot=structuredClone(cached.snapshot);
+  snapshot.voices=snapshot.voices.map(voice=>{
+    const path=coverStoragePath(voice,config.libraryId);
+    if(!path)return voice;
+    let image=signedCoverCache.get(`${config.projectRef}/${path}`);
+    if(!image||image.expiresAt<=Date.now()+60000){
+      try{image=validateSignedCover({path,url:voice.coverImage,expiresAt:voice.coverExpiresAt},config);}catch{image=null;}
+    }
+    if(image&&image.expiresAt<=Date.now()+60000)image=null;
+    return {...voice,coverStoragePath:path,coverImage:image?.url||'',coverExpiresAt:image?.expiresAt||null};
+  });
+  return {snapshot,revision:cached.revision,cacheUpdatedAt:cached.updatedAt,...(coverWarning?{cacheWarning:coverWarning}:{})};
+}
+
 let cacheGeneration=0;
 let cacheLoadPromise;
 let cacheWriteQueue=Promise.resolve();
@@ -80,7 +150,11 @@ async function managementQuery(config, operation, data, revision) {
   const execute = () => performManagementQuery(config, operation, data, revision);
   const pending = managementQueue.then(execute, execute);
   managementQueue = pending.catch(() => {});
-  return pending.then(result => result.snapshot ? hydrateSnapshotCovers(config, result) : result);
+  return pending.then(async result => {
+    if(!result.snapshot)return result;
+    const hydrated=await hydrateSnapshotCovers(config,result);
+    return cacheRemoteSnapshot(config,hydrated);
+  });
 }
 async function performManagementQuery(config, operation, data, revision) {
   const storage = await sessionStorage();
@@ -274,20 +348,32 @@ async function handle(request) {
     if(value)validateConnection(value);
     if(request.action!=='restore_cloud')assertConnectionIdentity(value || null, request);
     const record = value ? (await storage.get(quotaKey(value.projectRef)))[quotaKey(value.projectRef)] : null;
-    return { success: true, data: { connected: Boolean(value), projectRef: value?.projectRef ?? null, libraryId: value?.libraryId ?? null, rateLimit: value ? rateLimitView(record) : null } };
+    const cached=request.action==='restore_cloud'&&value?await restoredSnapshot(value):null;
+    if(request.action==='restore_cloud'){
+      const after=(await storage.get(SESSION_KEY))[SESSION_KEY];
+      if(!after)return {success:true,data:{connected:false,projectRef:null,libraryId:null,rateLimit:null,cacheAvailable:false}};
+      if(!sameIdentity(after,value))throw new CloudError('CONFIG_CHANGED','La sesión cambió en otra ventana. Vuelve a abrir la biblioteca.');
+    }
+    return { success: true, data: { connected: Boolean(value), projectRef: value?.projectRef ?? null, libraryId: value?.libraryId ?? null, rateLimit: value ? rateLimitView(record) : null, ...(request.action==='restore_cloud'?{cacheAvailable:Boolean(cached),...(cached||{})}:{}) } };
   }
-  if (request.action === 'disconnect_cloud') { const storage = await sessionStorage(); const value = (await storage.get(SESSION_KEY))[SESSION_KEY]; assertConnectionIdentity(value || null, request); const cleared=resetCoverCache(); await storage.remove(SESSION_KEY); await cleared; return { success: true }; }
+  if (request.action === 'disconnect_cloud') { const storage = await sessionStorage(); const value = (await storage.get(SESSION_KEY))[SESSION_KEY]; assertConnectionIdentity(value || null, request); const cleared=resetCoverCache(); await storage.remove(SESSION_KEY); await Promise.all([cleared,removeSnapshotCache()]); return { success: true }; }
   if (request.action === 'connect_cloud') {
     const config = validateConnection(request);
     const data = await connectConfiguredLibrary(config);
     const storage=await sessionStorage();
     const previous=(await storage.get(SESSION_KEY))[SESSION_KEY];
-    if(!previous||previous.projectRef!==config.projectRef||previous.libraryId!==config.libraryId)await resetCoverCache(config);
+    if(!sameIdentity(previous,config))await Promise.all([resetCoverCache(config),removeSnapshotCache()]);
     await storage.set({ [SESSION_KEY]: config });
     await persistCoverCache();
-    return { success: true, data };
+    return { success: true, data:await cacheRemoteSnapshot(config,data) };
   }
-  if (request.action === 'load_cloud') return { success: true, data: await managementQuery(await connection(request), 'load') };
+  if (request.action === 'load_cloud') {
+    const data=await managementQuery(await connection(request),'load');
+    // A different page may close or switch the remembered session while this
+    // explicit refresh is in flight. Never deliver its stale private snapshot.
+    await connection(request);
+    return {success:true,data};
+  }
   if (request.action === 'save_cloud') return { success: true, data: await managementQuery(await connection(request), 'save', request.data, request.expectedVersion) };
   if (request.action === 'upload_cover') return { success:true, data:await storageQuery(await connection(request), {action:'upload', dataUrl:request.dataUrl}) };
   if (request.action === 'resolve_fish_audio') {

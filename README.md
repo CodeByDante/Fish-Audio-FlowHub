@@ -8,9 +8,9 @@ Aplicación web y extensión de Chrome que conservan la interfaz negra de [Fish 
 
 [**Abrir Fish Audio Vault Online en GitHub Pages**](https://codebydante.github.io/fish-audio-vault-online/)
 
-Introduce tu token para cargar la misma biblioteca de la extensión. Los cambios guardados en cualquiera de las dos aparecen en la otra al actualizar o durante la consulta periódica de 15 segundos, mientras la interfaz esté visible e inactiva. La reproducción no guarda la biblioteca.
+Introduce tu token para cargar la misma biblioteca de la extensión. Después se guarda una copia cifrada en este navegador: abrir, recargar o volver a la pestaña muestra esa copia sin consultar Supabase. Pulsa **Actualizar** para traer los cambios guardados desde otro navegador o desde la extensión. La reproducción no guarda la biblioteca.
 
-La sesión se recuerda en este navegador hasta pulsar **Cerrar sesión**, tanto en la web como en la extensión. El token se cifra localmente con AES-GCM en IndexedDB, usando una clave Web Crypto no extraíble. No se publica en GitHub, URLs ni cookies y no se sincroniza con Chrome Sync. Al cerrar sesión se elimina la conexión guardada y su caché de portadas. Si el token caduca o lo revocas, tendrás que conectar uno válido.
+La sesión se recuerda en este navegador hasta pulsar **Cerrar sesión**, tanto en la web como en la extensión. El token y la copia de la biblioteca se cifran localmente con AES-GCM en IndexedDB, usando una clave Web Crypto no extraíble. No se publican en GitHub, URLs ni cookies y no se sincronizan con Chrome Sync. Al cerrar sesión se eliminan la conexión guardada y las copias de biblioteca y portadas. Si el token caduca o lo revocas, tendrás que conectar uno válido cuando vuelvas a consultar o guardar en Supabase.
 
 ## Instalar la extensión
 
@@ -33,7 +33,7 @@ La extensión también recuerda la sesión mediante almacenamiento local cifrado
 - Actualizar desde Supabase y sincronizar cambios entre instalaciones conectadas a la misma biblioteca.
 - Indicador de consultas API, disponibles y cuenta regresiva de reinicio.
 
-Los cambios se guardan al editar. Con la pestaña visible se consulta la biblioteca cada 15 segundos. **Actualizar** consulta en ese momento. Si otro equipo guardó antes, una revisión impide sobrescribirlo: la aplicación conserva la edición pendiente y permite exportarla o recargar la versión online. Espera a ver **Guardado en Supabase** antes de cerrar; una edición pendiente solo existe en la memoria de esa pestaña.
+Los cambios se guardan al editar. No hay consultas periódicas ni al cambiar de ventana: **Actualizar** consulta en ese momento. Si otro equipo guardó antes, una revisión impide sobrescribirlo: la aplicación conserva la edición pendiente y permite exportarla o recargar la versión online. Espera a ver **Guardado en Supabase** antes de cerrar; una edición pendiente solo existe en la memoria de esa pestaña. Si todavía no existe una copia guardada en este navegador, pulsa **Actualizar** para descargarla antes de editar.
 
 La descarga de una copia JSON es opcional. La biblioteca principal está en Supabase y no depende de un archivo local.
 
@@ -45,7 +45,7 @@ El nombre del archivo usa SHA-256: volver a subir exactamente la misma imagen re
 
 En la web se consultan muestras públicas de Fish Audio sin leer cookies de otras páginas. Los modelos que exigen una sesión de Fish Audio pueden necesitar la extensión, que puede usar la sesión de su navegador cuando el servicio lo permite.
 
-Los audios se reproducen desde sus enlaces de Fish Audio; no se guardan archivos de audio en Supabase. Reproducir, pausar o renovar un enlace de muestra no guarda la biblioteca ni consume peticiones de Supabase. Los enlaces renovados se reutilizan en una caché temporal de la sesión; se borran al salir o cambiar de biblioteca. La consulta periódica de sincronización se cuenta por separado. La extensión puede consultar el modelo de Fish Audio para renovar una muestra, usando la sesión del propio navegador cuando el servicio lo permita. Los permisos y disponibilidad de Fish Audio siguen siendo necesarios.
+Los audios se reproducen desde sus enlaces de Fish Audio; no se guardan archivos de audio en Supabase. Reproducir, pausar o renovar un enlace de muestra no guarda la biblioteca ni consume peticiones de Supabase. Los enlaces renovados se reutilizan en una caché temporal de la sesión; se borran al salir o cambiar de biblioteca. La extensión puede consultar el modelo de Fish Audio para renovar una muestra, usando la sesión del propio navegador cuando el servicio lo permita. Los permisos y disponibilidad de Fish Audio siguen siendo necesarios.
 
 ## Contador de API
 
@@ -54,7 +54,8 @@ Según la [documentación de Supabase](https://supabase.com/docs/reference/api/i
 - Leer las 118 voces juntas consume **una petición**, no 118.
 - Cada guardado de una edición consume una petición. Escuchar o renovar una muestra de Fish Audio no guarda datos en Supabase.
 - Subir o firmar un lote de imágenes hace una consulta adicional para autorizar el token; también se cuenta.
-- La firma de portadas se reutiliza mientras sea válida, incluso después de recargar. Abrir una sesión recordada o pulsar Actualizar normalmente hace una sola lectura de la biblioteca; renovar firmas vencidas cuenta aparte.
+- Abrir o recargar una sesión recordada y cambiar de ventana consumen **cero peticiones**: se usa la biblioteca guardada en este navegador. No hay consultas automáticas cada 15 segundos.
+- Pulsar **Actualizar** normalmente hace una sola lectura de la biblioteca. La firma de portadas se reutiliza mientras sea válida; renovar firmas vencidas cuenta aparte y se hace al consultar manualmente. Las portadas cuyo enlace haya caducado pueden necesitar esa actualización para volver a mostrarse.
 - El reloj y las consultas internas del indicador no hacen llamadas HTTP.
 - Fish Audio tiene su propia API y no consume este contador.
 
@@ -100,7 +101,7 @@ npm run package
 npm run build:pages
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.2.0.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.2.1.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 `npm run build:pages` genera `dist/pages` usando una lista explícita de archivos públicos. `.github/workflows/pages.yml` comprueba y publica ese directorio en GitHub Pages al actualizar `main`. GitHub Actions publica el código; los datos se sincronizan a través de Supabase, no de commits.
 

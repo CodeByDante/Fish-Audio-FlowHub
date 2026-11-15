@@ -61,7 +61,7 @@ export class CloudClient {
     const responseLibrary = result.libraryId || result.snapshot?.libraryId;
     if (!expected.projectRef || !expected.libraryId || result.projectRef !== expected.projectRef || responseLibrary !== expected.libraryId) throw new CloudError('La sesión pertenece a otro proyecto o biblioteca. Reconecta esta ventana.', 'CONFIG_CHANGED');
     const revision = result.revision ?? result.snapshot?.revision;
-    if (!Number.isSafeInteger(revision) || revision < 0 || !result.snapshot || !Array.isArray(result.snapshot.voices) || !Array.isArray(result.snapshot.folders)) throw new CloudError('La biblioteca online devolvió datos no válidos.', 'VALIDATION');
+    if (!Number.isSafeInteger(revision) || revision < 1 || !result.snapshot || !Array.isArray(result.snapshot.voices) || !Array.isArray(result.snapshot.folders)) throw new CloudError('La biblioteca online devolvió datos no válidos.', 'VALIDATION');
     this.revision = revision; this.projectRef = result.projectRef; this.libraryId = result.libraryId || result.snapshot.libraryId; this.connected = true; return result;
   }
   async load({ discardPending = false } = {}) {
@@ -77,6 +77,7 @@ export class CloudClient {
     return result;
   }
   save(data) {
+    if (this.connected && this.revision < 1) return Promise.reject(new CloudError('Pulsa Actualizar antes de editar esta biblioteca: aún no hay una copia local válida.', 'CACHE_MISSING'));
     // Capture at invocation, before queued asynchronous work or UI mutation.
     const snapshot = cloneSnapshot(data);
     this.lastSnapshot = snapshot; this.unsaved = true; this.pending += 1; this.changeSerial += 1;
@@ -119,7 +120,9 @@ export class CloudClient {
     if (this.connected || this.pending || this.unsaved || this.revision !== 0) throw new CloudError('La biblioteca cambió mientras se recuperaba la sesión.', 'PENDING');
     if (result.connected) {
       if (typeof result.projectRef !== 'string' || !result.projectRef || typeof result.libraryId !== 'string' || !result.libraryId) throw new CloudError('No se pudo recuperar la configuración de la sesión.', 'VALIDATION');
-      this.projectRef = result.projectRef; this.libraryId = result.libraryId;
+      const expected = { projectRef: result.projectRef, libraryId: result.libraryId };
+      if (result.cacheAvailable) this.accept(result, expected);
+      else { this.projectRef = result.projectRef; this.libraryId = result.libraryId; this.connected = true; }
     }
     return result;
   }

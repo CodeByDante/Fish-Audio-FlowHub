@@ -46,14 +46,10 @@ class App {
     this.render();
     await this.loadCloudConfiguration();
     await this.checkServerStatus(true);
-    this.cloudPollTimer = setInterval(() => this.syncCloudDataInBackground(), 15000);
     this.apiClockTimer = setInterval(() => this.renderApiQuota(), 1000);
     this.cloudStatusTimer = setInterval(() => {
       if (document.visibilityState === 'visible') this.cloud.status().catch(() => {});
     }, 5000);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') this.syncCloudDataInBackground();
-    });
     window.addEventListener('beforeunload', event => {
       if (this.cloud.pending || this.cloud.unsaved) { event.preventDefault(); event.returnValue = ''; }
     });
@@ -79,6 +75,10 @@ class App {
     this.cloudProjectInput = document.getElementById('cloudProjectInput');
     this.cloudLibraryInput = document.getElementById('cloudLibraryInput');
     this.cloudLoginError = document.getElementById('cloudLoginError');
+    this.cloudCachePanel = document.getElementById('cloudCachePanel');
+    this.cloudCacheMessage = document.getElementById('cloudCacheMessage');
+    document.getElementById('cloudFetchInitialBtn')?.addEventListener('click', () => this.refreshCloudManually());
+    document.getElementById('cloudCacheLogoutBtn')?.addEventListener('click', () => this.disconnectCloud());
     const tokenHint = document.getElementById('cloudTokenHint');
     if (tokenHint) tokenHint.textContent = 'La sesión se recuerda en este navegador hasta que pulses Cerrar sesión.';
     this.cloudLoginForm?.addEventListener('submit', async event => {
@@ -93,7 +93,7 @@ class App {
         this.applyCloudSnapshot(result);
         this.showCloudLogin(false);
         this.setCloudStatus('online', 'Supabase conectado');
-        this.setCloudNotice('');
+        this.setCloudNotice(''); this.reportCacheWarning(result);
       } catch (error) {
         this.cloudLoginError.textContent = !isExtensionContext() && error.code === 'NETWORK'
           ? error.message + ' Comprueba tu conexión y el acceso del proyecto desde la web. Vuelve a introducir el token para reintentar.'
@@ -109,7 +109,7 @@ class App {
     document.getElementById('cloudReloadBtn')?.addEventListener('click', () => this.refreshCloudManually());
     document.getElementById('cloudRetryBtn')?.addEventListener('click', async () => {
       this.setCloudStatus('pending', 'Guardando cambios…');
-      try { await this.cloud.retry(); this.setCloudNotice(''); this.setCloudStatus('online', 'Guardado en Supabase'); }
+      try { const result = await this.cloud.retry(); this.setCloudNotice(''); this.setCloudStatus('online', 'Guardado en Supabase'); this.reportCacheWarning(result); }
       catch (error) { this.reportCloudError(error); }
     });
   }
@@ -125,13 +125,20 @@ class App {
     } catch { /* The advanced fields remain available if config is missing. */ }
   }
 
-  showCloudLogin(show) {
+  showCloudLogin(show, cacheMissing = false) {
     this.cloudLogin.hidden = !show;
+    this.cloudLoginForm.hidden = cacheMissing;
+    if (this.cloudCachePanel) this.cloudCachePanel.hidden = !cacheMissing;
+    const loginTitle = document.getElementById('cloudLoginTitle');
+    if (loginTitle) loginTitle.textContent = cacheMissing ? 'Actualiza tu biblioteca' : 'Conecta tu biblioteca online';
     document.getElementById('cloudCancelLoginBtn').hidden = !this.cloud.connected;
     const container = document.querySelector('.app-container');
     container.inert = show;
     container.setAttribute('aria-hidden', String(show));
-    if (show) { this.cloudTokenInput.value = ''; this.cloudTokenInput.focus(); }
+    if (show) {
+      this.cloudTokenInput.value = '';
+      if (cacheMissing) document.getElementById('cloudFetchInitialBtn')?.focus(); else this.cloudTokenInput.focus();
+    }
   }
 
   setCloudStatus(kind, text) {
@@ -143,12 +150,18 @@ class App {
     if (label) label.textContent = text;
   }
 
-  setCloudNotice(message, conflict = false) {
+  setCloudNotice(message, conflict = false, manualRefreshOnly = false) {
     const notice = document.getElementById('cloudNotice');
     notice.hidden = !message;
     document.getElementById('cloudNoticeText').textContent = message;
-    document.getElementById('cloudRetryBtn').hidden = conflict;
-    document.getElementById('cloudReloadBtn').hidden = !conflict;
+    document.getElementById('cloudRetryBtn').hidden = conflict || manualRefreshOnly;
+    document.getElementById('cloudReloadBtn').hidden = !conflict && !manualRefreshOnly;
+    document.getElementById('cloudReloadBtn').textContent = manualRefreshOnly ? 'Actualizar' : 'Recargar versión online';
+    document.getElementById('cloudReconnectBtn').hidden = manualRefreshOnly;
+  }
+
+  reportCacheWarning(result) {
+    if (result?.cacheWarning) this.setCloudNotice('Los datos están online, pero no se pudo actualizar la copia local. Actualiza manualmente al reabrir para consultar la versión más reciente.', false, true);
   }
 
   reportCloudError(error) {
@@ -207,13 +220,25 @@ class App {
   }
 
   async refreshCloudManually() {
+    if (this.isRefreshing) return;
     if (this.cloud.pending) { this.setCloudNotice('Espera a que termine el guardado actual.'); return; }
     if (this.cloud.unsaved && !window.confirm('Hay cambios sin guardar en esta ventana. Exporta una copia si necesitas conservarlos. ¿Descartar esos cambios y cargar la versión online?')) return;
+    this.isRefreshing = true;
+    const buttons = ['cloudRefreshBtn', 'cloudReloadBtn', 'cloudFetchInitialBtn'].map(id => document.getElementById(id)).filter(Boolean);
+    buttons.forEach(button => { button.disabled = true; });
     try {
       this.setCloudStatus('pending', 'Consultando Supabase…');
+      if (this.cloudCacheMessage) this.cloudCacheMessage.textContent = 'Consultando la biblioteca en Supabase…';
       const result = await this.cloud.load({ discardPending: true });
-      this.applyCloudSnapshot(result); this.setCloudStatus('online', 'Supabase actualizado'); this.setCloudNotice('');
-    } catch (error) { this.reportCloudError(error); }
+      this.applyCloudSnapshot(result); this.showCloudLogin(false); this.setCloudStatus('online', 'Supabase actualizado'); this.setCloudNotice('');
+      this.coverRefreshIds.clear(); this.reportCacheWarning(result);
+    } catch (error) {
+      this.reportCloudError(error);
+      if (this.cloudLogin && !this.cloudLogin.hidden && this.cloudCacheMessage) this.cloudCacheMessage.textContent = error.message + ' Pulsa Actualizar para volver a intentarlo.';
+    } finally {
+      this.isRefreshing = false;
+      buttons.forEach(button => { button.disabled = false; });
+    }
   }
 
   async disconnectCloud() {
@@ -337,11 +362,6 @@ class App {
     }
   }
 
-  async loadData() {
-    const result = await this.cloud.load();
-    this.applyCloudSnapshot(result);
-    return result;
-  }
 
   ensureFixedFoldersOrder(folders) {
     if (!Array.isArray(folders)) return JSON.parse(JSON.stringify(DEFAULT_FOLDERS));
@@ -359,21 +379,6 @@ class App {
     return [allFolder, favoritesFolder, sueltasFolder, ...customFolders];
   }
 
-  async syncCloudDataInBackground() {
-    if (this.cloud.rateLimit?.remaining <= 0 && Number(this.cloud.rateLimit?.resetAt) > Date.now()) return;
-    if (!this.cloud.connected || this.cloud.pending || this.cloud.unsaved || this.isRefreshing || document.visibilityState !== 'visible' || this.currentPlayingId) return;
-    if ([this.addModal, this.createFolderModal, this.editFolderModal, this.confirmModal, this.settingsModal].some(modal => modal && modal.style.display !== 'none')) return;
-    this.isRefreshing = true;
-    const previousRevision = this.cloud.revision;
-    try {
-      const result = await this.cloud.load();
-      if (this.cloud.pending || this.cloud.unsaved) return;
-      if (result.revision !== previousRevision) this.applyCloudSnapshot(result);
-      else this.updateSignedCovers(result.snapshot.voices);
-      this.setCloudStatus('online', 'Supabase conectado'); this.setCloudNotice('');
-    } catch (error) { if (error.code !== 'PENDING') this.reportCloudError(error); }
-    finally { this.isRefreshing = false; }
-  }
 
   async checkServerStatus(resume = false) {
     try {
@@ -382,9 +387,19 @@ class App {
       if (status.connected && resume) {
         if (this.cloudProjectInput) this.cloudProjectInput.value = status.projectRef || this.cloud.projectRef || '';
         if (this.cloudLibraryInput) this.cloudLibraryInput.value = status.libraryId || this.cloud.libraryId || '';
-        await this.loadData(); this.showCloudLogin(false); this.setCloudStatus('online', 'Supabase conectado');
+        if (status.cacheAvailable && status.snapshot) {
+          this.applyCloudSnapshot(status); this.showCloudLogin(false); this.setCloudStatus('online', 'Copia guardada · sin consultas'); this.setCloudNotice('');
+          if (status.snapshot.voices.some(voice => voice.coverStoragePath && !voice.coverImage)) this.setCloudNotice('Algunas portadas necesitan renovar su enlace. Pulsa Actualizar cuando quieras consultarlas en Supabase.', false, true);
+        } else {
+          this.setCloudStatus('offline', 'Copia local pendiente');
+          if (this.cloudCacheMessage) this.cloudCacheMessage.textContent = 'Tu sesión está guardada, pero este navegador aún no tiene una copia de la biblioteca. Pulsa Actualizar para consultarla. Abrir o cambiar de pestaña no consulta Supabase.';
+          this.showCloudLogin(true, true);
+        }
       } else if (!status.connected) { this.setCloudStatus('offline', 'Conecta tu biblioteca'); this.showCloudLogin(true); }
-    } catch { this.setCloudStatus('offline', 'Conecta tu biblioteca'); this.showCloudLogin(true); }
+    } catch (error) {
+      this.setCloudStatus('offline', 'Conecta tu biblioteca'); this.showCloudLogin(true);
+      if (this.cloudLoginError) this.cloudLoginError.textContent = error.message || 'No se pudo recuperar la sesión guardada. Vuelve a conectar.';
+    }
   }
 
   bindEvents() {
@@ -974,8 +989,8 @@ class App {
       await writable.write(JSON.stringify(data, null, 2)); await writable.close();
     })().catch(error => error) : Promise.resolve(null);
     try {
-      await cloudSave;
-      if (!this.cloud.pending && !this.cloud.unsaved) { this.setCloudStatus('online', 'Guardado en Supabase'); this.setCloudNotice(''); }
+      const result = await cloudSave;
+      if (!this.cloud.pending && !this.cloud.unsaved) { this.setCloudStatus('online', 'Guardado en Supabase'); this.setCloudNotice(''); this.reportCacheWarning(result); }
     } catch (error) { this.reportCloudError(error); }
     const backupError = await backupSave;
     if (backupError) this.setCloudNotice('Falló la copia opcional en disco. Comprueba el indicador del guardado online.');
@@ -1595,17 +1610,10 @@ class App {
     if (changed) this.render();
   }
 
-  async refreshExpiredCover(voice) {
+  refreshExpiredCover(voice) {
     if (!voice.coverStoragePath || this.coverRefreshIds.has(voice.id) || this.cloud.pending || this.cloud.unsaved || !this.cloud.connected) return;
     this.coverRefreshIds.add(voice.id);
-    try {
-      const result = await this.cloud.load();
-      if (this.cloud.pending || this.cloud.unsaved) return;
-      const fresh = result.snapshot.voices.find(item => item.id === voice.id);
-      const current = this.voices.find(item => item.id === voice.id);
-      if (fresh && current) { current.coverImage = safeAssetUrl(fresh.coverImage, 'image'); current.coverExpiresAt = fresh.coverExpiresAt; }
-      this.render();
-    } catch { /* Polling can recover later; one error never loops uploads/signing. */ }
+    this.setCloudNotice('Una portada necesita renovar su enlace. Pulsa Actualizar cuando quieras consultarla en Supabase.', false, true);
   }
 
   createCardElement(voice, options = {}) {
