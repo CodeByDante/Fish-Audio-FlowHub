@@ -19,7 +19,7 @@ El token permanece en `chrome.storage.session`, restringido a los contextos inte
 
 - Buscar y ordenar voces; reproducir, pausar y desplazar el audio.
 - Agregar, editar y archivar voces; títulos, enlaces, notas y portadas.
-- Carpetas, favoritos, versiones de una voz, selección múltiple y organizador con arrastre.
+- Carpetas, favoritos, versiones de una voz, selección múltiple y reordenación de carpetas por arrastre.
 - Subir o pegar una imagen, recortarla y guardarla en Supabase Storage.
 - Importar/exportar JSON y descargar copias de respaldo manuales.
 - Actualizar desde Supabase y sincronizar cambios entre instalaciones conectadas a la misma biblioteca.
@@ -62,17 +62,22 @@ Las imágenes pasan por la Edge Function `voice-vault-storage`: valida el token 
 
 Permisos Chrome: `storage`, `clipboardWrite` y acceso a los hosts de Supabase y Fish Audio. No solicita leer todas las cookies, todas las páginas ni el historial. La política CSP carga scripts únicamente desde la propia extensión.
 
-## Configurar otra base
+## Preparación automática al conectar
 
-La instalación configurada ya tiene tablas y función desplegadas. Para un proyecto diferente:
+La extensión revisa las tablas y funciones del proyecto seleccionado al introducir el token:
 
-1. Ejecuta `database/voice_vault_schema.sql` y después `database/online_api.sql` como administrador.
-2. Crea una fila en `libraries` y sus carpetas iniciales (`all`, `f_favorites`, `f_sueltas`). El propietario puede ser nulo en esta modalidad personal de administración.
-3. Despliega `supabase/functions/voice-vault-storage/index.ts`, con `verify_jwt = false`. La función usa las variables privadas que Supabase proporciona al runtime; nunca las copies a la extensión.
-4. Cambia `config.json` o abre **Proyecto y biblioteca** en la pantalla de conexión. Usa un PAT con `database_write` para ese proyecto: también se necesita al conectar y cargar, porque las funciones de administración se ejecutan como `postgres`. El SELECT de carga es fijo y no modifica datos.
-5. Importa tu copia JSON desde Configuración. Conserva un respaldo antes de sustituir una biblioteca.
+- Si no existe la estructura de Voice Vault, crea las tablas, políticas RLS y funciones de administración.
+- Si ya existe y es compatible, la reutiliza y carga sus datos.
+- Si falta la biblioteca seleccionada, crea una biblioteca vacía con Todas, Favoritas y Voces Sueltas.
+- Si encuentra tablas parciales o una estructura incompatible, detiene la conexión y explica el problema. No sustituye ni borra datos existentes.
 
-Las verificaciones SQL de `database/verify_voice_vault.sql` y `database/verify_online_api.sql` crean datos temporales dentro de una transacción y terminan con `ROLLBACK`.
+Esta revisión usa consultas API y se incluye en el contador. La creación solo se realiza cuando hace falta. El token necesita `database_write`, también para cargar las funciones de administración como `postgres`.
+
+Para usar otro proyecto, abre **Proyecto y biblioteca** en la pantalla de conexión e introduce su referencia y un UUID de biblioteca. El token debe tener permisos en ese proyecto. Conserva un respaldo antes de importar datos.
+
+La instalación preconfigurada ya tiene el servicio de imágenes desplegado. En un proyecto diferente, las portadas requieren desplegar `supabase/functions/voice-vault-storage/index.ts` con `verify_jwt = false`; utiliza únicamente las variables privadas del runtime de Supabase. La preparación automática de tablas no copia credenciales ni despliega servicios externos.
+
+Los archivos de `database/` documentan el esquema y contienen las verificaciones transaccionales, que terminan con `ROLLBACK`.
 
 ## Desarrollo
 
@@ -84,7 +89,7 @@ npm test
 npm run package
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.0.2.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.1.0.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 La extensión se instala en Chrome; abrir `index.html` como una web normal no proporciona el service worker ni la API `chrome.storage.session`.
 

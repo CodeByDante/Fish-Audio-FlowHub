@@ -23,7 +23,7 @@ async function managementQuery(config, operation, data, revision) {
   const execute = () => performManagementQuery(config, operation, data, revision);
   const pending = managementQueue.then(execute, execute);
   managementQueue = pending.catch(() => {});
-  return pending.then(result => hydrateSnapshotCovers(config, result));
+  return pending.then(result => result.snapshot ? hydrateSnapshotCovers(config, result) : result);
 }
 async function performManagementQuery(config, operation, data, revision) {
   const storage = await sessionStorage();
@@ -50,9 +50,21 @@ async function performManagementQuery(config, operation, data, revision) {
     const text = await response.text();
     if (!response.ok) {
       // Inspect only the SQLSTATE marker, never forward a database error/body.
+      if (/VAULT_SCHEMA_INCOMPATIBLE/.test(text)) throw new CloudError('SCHEMA_INCOMPATIBLE', 'El proyecto contiene tablas o funciones incompatibles. No se cambió ni eliminó ningún dato.', rateLimit);
+      if (/Library unavailable/.test(text)) throw new CloudError('LIBRARY_MISSING', 'La biblioteca solicitada no está disponible.', rateLimit);
       if (/40001|VAULT_REVISION_CONFLICT/.test(text)) throw new CloudError('CONFLICT', 'La biblioteca cambió en otro dispositivo. Recarga antes de guardar.', rateLimit);
       if (response.status === 401 || response.status === 403) throw new CloudError('AUTH', 'No se pudo autorizar el acceso. Revisa el token y sus permisos.', rateLimit);
       throw new CloudError('NETWORK', 'No se pudo completar la consulta online. Los cambios locales se conservan.', rateLimit);
+    }
+    const common = {projectRef:config.projectRef,libraryId:config.libraryId,rateLimit};
+    if (operation === 'bootstrap') return {...common,bootstrapped:true};
+    if (operation === 'probe' || operation === 'seed') {
+      const rows = JSON.parse(text);
+      const key = operation === 'probe' ? 'schema_state' : 'seed_result';
+      const cell = Array.isArray(rows) ? rows[0]?.[key] : rows?.[key];
+      const value = typeof cell === 'string' ? JSON.parse(cell) : cell;
+      if (!value || typeof value !== 'object' || (operation === 'probe' && !['empty','compatible','incompatible'].includes(value.state))) throw new CloudError('NETWORK', 'No se pudo comprobar la configuración del proyecto.', rateLimit);
+      return {...common,[operation === 'probe' ? 'schemaState' : 'seedResult']:value};
     }
     const decoded = decodeSnapshot(JSON.parse(text));
     if (typeof decoded.snapshot.libraryId !== 'string' || decoded.snapshot.libraryId.toLowerCase() !== config.libraryId.toLowerCase()) throw new CloudError('CONFIG_CHANGED', 'La respuesta pertenece a otra biblioteca. Vuelve a conectar antes de continuar.', rateLimit);
@@ -63,6 +75,48 @@ async function performManagementQuery(config, operation, data, revision) {
     throw safe;
   } finally { if (timeout) clearTimeout(timeout); }
 }
+let bootstrapAssetPromise;
+async function bootstrapAsset() {
+  if (!bootstrapAssetPromise) bootstrapAssetPromise = (async () => {
+    const response = await fetch(chrome.runtime.getURL('src/sql/bootstrap.sql'), {credentials:'omit'});
+    if (!response.ok) throw new CloudError('SETUP_ERROR', 'No se encontró el paquete de configuración de esta extensión. Vuelve a instalarla.');
+    return response.text();
+  })().catch(error => {bootstrapAssetPromise=null;throw error;});
+  return bootstrapAssetPromise;
+}
+async function connectConfiguredLibrary(config) {
+  const probe = await managementQuery(config,'probe');
+  const setup = {createdSchema:false,createdLibrary:false};
+  let seeded=false;
+  const seedLibrary=async()=>{
+    const seed=await managementQuery(config,'seed');
+    seeded=true;
+    setup.createdLibrary=Boolean(seed.seedResult.createdLibrary);
+    // A concurrent initializer may commit while the seed statement waits for
+    // its lock. Its snapshot can still report unavailable: a fresh load decides.
+  };
+  const unavailable=rateLimit=>new CloudError('LIBRARY_MISSING', 'La biblioteca está archivada o no está disponible; no se restauró automáticamente.', rateLimit);
+  if (probe.schemaState.state === 'incompatible') throw new CloudError('SCHEMA_INCOMPATIBLE', 'El proyecto contiene tablas o funciones incompatibles. No se cambió ni eliminó ningún dato.', probe.rateLimit);
+  if (probe.schemaState.state === 'empty') {
+    await managementQuery(config,'bootstrap',await bootstrapAsset());
+    setup.createdSchema=true;
+    await seedLibrary();
+  }
+  let result;
+  try {result=await managementQuery(config,'load');}
+  catch(error) {
+    if (error.code !== 'LIBRARY_MISSING') throw error;
+    if (seeded) throw unavailable(error.rateLimit);
+    await seedLibrary();
+    try {result=await managementQuery(config,'load');}
+    catch(reloaded) {
+      if (reloaded.code === 'LIBRARY_MISSING') throw unavailable(reloaded.rateLimit);
+      throw reloaded;
+    }
+  }
+  return {...result,setup};
+}
+
 async function storageQuery(config, body) {
   const execute = () => performStorageQuery(config, body);
   const pending = managementQueue.then(execute, execute);
@@ -154,7 +208,7 @@ async function handle(request) {
   if (request.action === 'disconnect_cloud') { const storage = await sessionStorage(); const value = (await storage.get(SESSION_KEY))[SESSION_KEY]; assertConnectionIdentity(value || null, request); signedCoverCache.clear(); await storage.remove(SESSION_KEY); return { success: true }; }
   if (request.action === 'connect_cloud') {
     const config = validateConnection(request);
-    const data = await managementQuery(config, 'load');
+    const data = await connectConfiguredLibrary(config);
     await (await sessionStorage()).set({ [SESSION_KEY]: config });
     return { success: true, data };
   }

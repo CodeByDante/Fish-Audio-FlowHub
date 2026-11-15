@@ -84,7 +84,8 @@ class App {
       const token = this.cloudTokenInput.value.trim();
       this.cloudTokenInput.value = '';
       const submit = document.getElementById('cloudConnectBtn');
-      submit.disabled = true; this.cloudLoginError.textContent = '';
+      const originalLabel = submit.textContent;
+      submit.disabled = true; submit.textContent = 'Preparando biblioteca…'; this.cloudLoginError.textContent = '';
       try {
         const result = await this.cloud.connect(token, this.cloudProjectInput.value.trim(), this.cloudLibraryInput.value.trim());
         this.applyCloudSnapshot(result);
@@ -92,7 +93,7 @@ class App {
         this.setCloudStatus('online', 'Supabase conectado');
         this.setCloudNotice('');
       } catch (error) { this.cloudLoginError.textContent = error.message; this.setCloudStatus('offline', 'Sin conexión'); }
-      finally { submit.disabled = false; }
+      finally { submit.disabled = false; submit.textContent = originalLabel; }
     });
     document.getElementById('cloudCancelLoginBtn')?.addEventListener('click', () => this.showCloudLogin(false));
     document.getElementById('cloudLogoutBtn')?.addEventListener('click', () => this.disconnectCloud());
@@ -264,15 +265,6 @@ class App {
     this.editFolderForm = document.getElementById('editFolderForm');
     this.editFolderNameInput = document.getElementById('editFolderNameInput');
 
-    // Tree View / Map Modal Elements
-    this.treeViewBtn = document.getElementById('treeViewBtn');
-    this.treeViewModal = document.getElementById('treeViewModal');
-    this.closeTreeViewModalBtn = document.getElementById('closeTreeViewModalBtn');
-    this.treeSearchInput = document.getElementById('treeSearchInput');
-    this.expandAllTreeBtn = document.getElementById('expandAllTreeBtn');
-    this.collapseAllTreeBtn = document.getElementById('collapseAllTreeBtn');
-    this.treeContainer = document.getElementById('treeContainer');
-
     // Multi-Select Elements
     this.toggleMultiSelectBtn = document.getElementById('toggleMultiSelectBtn');
     this.toggleMultiSelectMode = document.getElementById('toggleMultiSelectMode');
@@ -362,7 +354,7 @@ class App {
   async syncCloudDataInBackground() {
     if (this.cloud.rateLimit?.remaining <= 0 && Number(this.cloud.rateLimit?.resetAt) > Date.now()) return;
     if (!this.cloud.connected || this.cloud.pending || this.cloud.unsaved || this.isRefreshing || document.visibilityState !== 'visible' || this.currentPlayingId) return;
-    if ([this.addModal, this.createFolderModal, this.editFolderModal, this.confirmModal, this.settingsModal, this.treeViewModal].some(modal => modal && modal.style.display !== 'none')) return;
+    if ([this.addModal, this.createFolderModal, this.editFolderModal, this.confirmModal, this.settingsModal].some(modal => modal && modal.style.display !== 'none')) return;
     this.isRefreshing = true;
     const previousRevision = this.cloud.revision;
     try {
@@ -502,28 +494,6 @@ class App {
       });
     }
 
-    // Tree View / Map Modal Events
-    if (this.treeViewBtn) {
-      this.treeViewBtn.addEventListener('click', () => this.showTreeViewModal());
-    }
-    if (this.closeTreeViewModalBtn) {
-      this.closeTreeViewModalBtn.addEventListener('click', () => this.hideTreeViewModal());
-    }
-    if (this.treeViewModal) {
-      this.treeViewModal.addEventListener('click', (e) => {
-        if (e.target === this.treeViewModal) this.hideTreeViewModal();
-      });
-    }
-    if (this.treeSearchInput) {
-      this.treeSearchInput.addEventListener('input', () => this.renderTreeView());
-    }
-    if (this.expandAllTreeBtn) {
-      this.expandAllTreeBtn.addEventListener('click', () => this.expandAllTree());
-    }
-    if (this.collapseAllTreeBtn) {
-      this.collapseAllTreeBtn.addEventListener('click', () => this.collapseAllTree());
-    }
-
     // Confirm Modal Events
     if (this.closeConfirmModalBtn) {
       this.closeConfirmModalBtn.addEventListener('click', () => this.hideConfirmDialog());
@@ -610,7 +580,6 @@ class App {
         if (this.addModal && this.addModal.style.display !== 'none') this.hideModal();
         if (this.createFolderModal && this.createFolderModal.style.display !== 'none') this.hideFolderModal();
         if (this.editFolderModal && this.editFolderModal.style.display !== 'none') this.hideEditFolderModal();
-        if (this.treeViewModal && this.treeViewModal.style.display !== 'none') this.hideTreeViewModal();
         if (this.confirmModal && this.confirmModal.style.display !== 'none') this.hideConfirmDialog();
         if (this.settingsModal && this.settingsModal.style.display !== 'none') this.hideSettingsModal();
       }
@@ -937,122 +906,6 @@ class App {
         this.render();
       }
     );
-  }
-
-  showTreeViewModal() {
-    if (this.treeSearchInput) this.treeSearchInput.value = '';
-    this.renderTreeView();
-    if (this.treeViewModal) this.treeViewModal.style.display = 'flex';
-  }
-
-  hideTreeViewModal() {
-    if (this.treeViewModal) this.treeViewModal.style.display = 'none';
-  }
-
-  expandAllTree() {
-    if (!this.treeContainer) return;
-    const nodes = this.treeContainer.querySelectorAll('.tree-folder-node');
-    nodes.forEach(node => node.classList.add('open'));
-  }
-
-  collapseAllTree() {
-    if (!this.treeContainer) return;
-    const nodes = this.treeContainer.querySelectorAll('.tree-folder-node');
-    nodes.forEach(node => node.classList.remove('open'));
-  }
-
-  renderTreeView() {
-    if (!this.treeContainer) return;
-    const query = this.treeSearchInput ? this.treeSearchInput.value.toLowerCase().trim() : '';
-    this.treeContainer.innerHTML = '';
-
-    const validFolders = this.folders.filter(f => f.id !== 'all');
-
-    validFolders.forEach(folder => {
-      const folderVoices = this.voices.filter(v => folder.id === 'f_favorites' ? !!v.isFavorite : v.folderId === folder.id);
-
-      const matchingVoices = folderVoices.filter(v => {
-        return !query || v.title.toLowerCase().includes(query) || folder.name.toLowerCase().includes(query);
-      });
-
-      if (query && matchingVoices.length === 0) return;
-
-      const node = document.createElement('div');
-      node.className = `tree-folder-node ${query ? 'open' : ''}`;
-
-      node.innerHTML = `
-        <div class="tree-folder-header">
-          <div class="tree-folder-title">
-            <span class="tree-arrow-icon">▶</span>
-            <span>${this.escape(folder.name)}</span>
-          </div>
-          <span class="folder-tab-count">${matchingVoices.length} voces</span>
-        </div>
-        <div class="tree-folder-items"></div>
-      `;
-
-      const header = node.querySelector('.tree-folder-header');
-      header.addEventListener('click', () => {
-        node.classList.toggle('open');
-      });
-
-      const itemsContainer = node.querySelector('.tree-folder-items');
-
-      if (matchingVoices.length === 0) {
-        itemsContainer.innerHTML = `<div style="padding: 0.45rem; font-size: 0.8rem; color: var(--text-muted);">Sin voces en esta carpeta</div>`;
-      } else {
-        matchingVoices.forEach(voice => {
-          const itemEl = document.createElement('div');
-          itemEl.className = 'tree-voice-item';
-
-          const hasValidThumb = voice.coverImage && voice.coverImage.trim() !== '' && !voice.coverImage.startsWith('images/v_') && !voice.coverImage.includes('icon128.png');
-          const thumbPlaceholder = `<div class="tree-voice-thumb-placeholder"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg></div>`;
-          const thumbHtml = hasValidThumb
-            ? `<img src="${this.escape(safeAssetUrl(voice.coverImage, 'image'))}" class="tree-voice-thumb" alt="Portada">`
-            : thumbPlaceholder;
-
-          itemEl.innerHTML = `
-            <div class="tree-voice-left">
-              ${thumbHtml}
-              <span class="tree-voice-title">${this.escape(voice.title)}</span>
-            </div>
-            <div class="tree-voice-actions">
-              <button class="btn btn-secondary btn-sm goto-folder-btn" title="Ver esta carpeta en la lista">Ver en Lista</button>
-              <button class="btn btn-secondary btn-sm copy-link-btn" title="Copiar enlace">Copiar Enlace</button>
-            </div>
-          `;
-
-          itemEl.querySelector('img')?.addEventListener('error', event => { event.target.outerHTML = thumbPlaceholder; }, { once: true });
-
-          const gotoBtn = itemEl.querySelector('.goto-folder-btn');
-          const copyBtn = itemEl.querySelector('.copy-link-btn');
-
-          gotoBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.activeFolderId = folder.id;
-            this.hideTreeViewModal();
-            this.renderFolders();
-            this.render();
-          });
-
-          copyBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(voice.url).then(() => {
-              copyBtn.textContent = '¡Copiado!';
-              setTimeout(() => copyBtn.textContent = 'Copiar Enlace', 1500);
-            });
-          });
-
-          itemsContainer.appendChild(itemEl);
-        });
-      }
-
-      this.treeContainer.appendChild(node);
-    });
-
-    if (this.treeContainer.children.length === 0) {
-      this.treeContainer.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">No se encontraron voces o carpetas que coincidan con la búsqueda.</div>`;
-    }
   }
 
   saveNewFolder() {

@@ -66,6 +66,7 @@ test('background rejects external senders, keeps PAT in session only and sanitiz
     assert.equal(options.redirect, 'error');
     assert.match(options.headers.Authorization, /^Bearer test_only_/);
     assert.doesNotMatch(options.body, /test_only_/);
+    if (JSON.parse(options.body).query === core.SCHEMA_PROBE_SQL) return {ok:true,status:201,headers:new Headers({'X-RateLimit-Limit':'120','X-RateLimit-Remaining':String(120-fetchCalls),'X-RateLimit-Reset':'30'}),text:async()=>JSON.stringify([{schema_state:{state:'compatible'}}])};
     const headers = new Headers({ 'X-RateLimit-Limit':'120', 'X-RateLimit-Remaining':nextRateLimit ? '0' : String(120-fetchCalls), 'X-RateLimit-Reset':'30', 'Retry-After':'35' });
     if (nextRateLimit) return {ok:false,status:429,headers,text:async()=> 'internal rate limit'};
     const snapshot=fixture();
@@ -85,13 +86,13 @@ test('background rejects external senders, keeps PAT in session only and sanitiz
     const connected = await send({ action:'connect_cloud', token, projectRef:'ktcjeltckzdeetucfplw', libraryId });
     assert.equal(connected.success, true);
     assert.equal(connected.data.snapshot.voices.length,118);
-    assert.equal(fetchCalls,1,'118 returned records consume one request');
-    assert.equal(connected.data.rateLimit.requestsThisSession,1);
+    assert.equal(fetchCalls,2,'one compatibility probe plus one export query for 118 records');
+    assert.equal(connected.data.rateLimit.requestsThisSession,2);
     assert.equal(connected.data.rateLimit.source,'server');
     assert.doesNotMatch(JSON.stringify(connected), /test_only_/);
     const status = await send({action:'cloud_status'});
     assert.equal(status.data.connected, true);
-    assert.equal(fetchCalls,1,'reading status/clock must not call Management API');
+    assert.equal(fetchCalls,2,'reading status/clock must not call Management API');
     assert.doesNotMatch(JSON.stringify(status), /test_only_/);
     nextConflict = true;
     const conflict = await send({action:'save_cloud', data:fixture(), expectedVersion:1});
@@ -102,10 +103,10 @@ test('background rejects external senders, keeps PAT in session only and sanitiz
     const throttled=await send({action:'load_cloud'});
     assert.equal(throttled.code,'RATE_LIMIT');
     assert.equal(throttled.rateLimit.remaining,0);
-    assert.equal(throttled.rateLimit.requestsThisSession,3);
+    assert.equal(throttled.rateLimit.requestsThisSession,4);
     const guarded=await send({action:'load_cloud'});
     assert.equal(guarded.code,'RATE_LIMIT');
-    assert.equal(fetchCalls,3,'429 guard must not issue another HTTP request before reset');
+    assert.equal(fetchCalls,4,'429 guard must not issue another HTTP request before reset');
     await send({action:'disconnect_cloud'});
     assert.equal((await send({action:'cloud_status'})).data.connected, false);
     assert.ok(accesses.every(value => value === 'TRUSTED_CONTEXTS'));
@@ -185,6 +186,7 @@ test('background batches private cover signing, caches URLs and uploads without 
     if(url.startsWith('https://api.supabase.com/')){
       managementCalls++;
       const request=JSON.parse(options.body);
+      if(request.query===core.SCHEMA_PROBE_SQL)return response([{schema_state:{state:'compatible'}}],new Headers({'X-RateLimit-Limit':'120','X-RateLimit-Remaining':String(120-managementCalls-edgeCalls),'X-RateLimit-Reset':'30'}));
       if(request.parameters.length===3){savedPayload=JSON.parse(request.parameters[2]);assert.doesNotMatch(options.body,/TEMPORARY_SIGNATURE/);}
       const snapshot=fixture();snapshot.libraryId=libraryId;snapshot.revision=managementCalls;
       snapshot.voices[0].coverStoragePath=savedPayload ? secondPath : coverPath;snapshot.voices[0].coverImage='';
@@ -203,10 +205,10 @@ test('background batches private cover signing, caches URLs and uploads without 
     const connected=await send({action:'connect_cloud',token:'test_only_12345678901234567890',projectRef:'ktcjeltckzdeetucfplw',libraryId});
     assert.equal(connected.success,true);
     assert.match(connected.data.snapshot.voices[0].coverImage,/TEMPORARY_SIGNATURE/);
-    assert.equal(managementCalls,1);assert.equal(edgeCalls,1,'all private covers signed in one batch');
-    assert.equal(connected.data.rateLimit.requestsThisSession,2);
+    assert.equal(managementCalls,2);assert.equal(edgeCalls,1,'all private covers signed in one batch');
+    assert.equal(connected.data.rateLimit.requestsThisSession,3);
     await send({action:'load_cloud'});
-    assert.equal(managementCalls,2);assert.equal(edgeCalls,1,'valid cached signatures do not consume another Edge query');
+    assert.equal(managementCalls,3);assert.equal(edgeCalls,1,'valid cached signatures do not consume another Edge query');
     const upload=await send({action:'upload_cover',dataUrl:pngDataUrl});
     assert.equal(upload.success,true);assert.equal(upload.data.path,secondPath);assert.equal(edgeCalls,2);
     const data=fixture();data.voices[0]={...data.voices[0],coverImage:upload.data.url,coverStoragePath:upload.data.path,coverExpiresAt:upload.data.expiresAt};
@@ -237,6 +239,7 @@ test('a stale tab cannot read, overwrite, disconnect or upload into another tab 
   globalThis.fetch=async(_url,options)=>{
     calls++;
     const body=JSON.parse(options.body);
+    if(body.query===core.SCHEMA_PROBE_SQL)return {ok:true,status:200,headers:new Headers(),text:async()=>JSON.stringify([{schema_state:{state:'compatible'}}])};
     const snapshot={...fixture(),libraryId:body.parameters[0],revision:1};
     return {ok:true,status:200,headers:new Headers(),text:async()=>JSON.stringify([{snapshot}])};
   };
@@ -247,19 +250,19 @@ test('a stale tab cannot read, overwrite, disconnect or upload into another tab 
     const token='test_only_12345678901234567890';
     assert.equal((await send({action:'connect_cloud',token})).success,true);
     assert.equal((await send({action:'connect_cloud',token},identityB)).success,true);
-    assert.equal(calls,2);
+    assert.equal(calls,4);
     const staleRequests=[{action:'load_cloud'},{action:'save_cloud',data:fixture(),expectedVersion:1},{action:'upload_cover',dataUrl:pngDataUrl},{action:'cloud_status'},{action:'disconnect_cloud'},{action:'resolve_fish_audio',modelId:'abcdefgh'}];
     for(const request of staleRequests){
       const result=await send(request);
       assert.equal(result.code,'CONFIG_CHANGED',request.action);
-      assert.equal(calls,2,`${request.action} must fail before HTTP or quota use`);
+      assert.equal(calls,4,`${request.action} must fail before HTTP or quota use`);
     }
     const status=await send({action:'cloud_status'},identityB);
     assert.equal(status.data.connected,true,'old tab must not disconnect the new global connection');
     assert.equal(status.data.libraryId,identityB.libraryId);
-    assert.equal(status.data.rateLimit.requestsThisSession,2);
+    assert.equal(status.data.rateLimit.requestsThisSession,4);
     assert.equal((await send({action:'save_cloud',data:fixture(),expectedVersion:1},identityB)).success,true);
-    assert.equal(calls,3,'the new tab may save to its own library');
+    assert.equal(calls,5,'the new tab may save to its own library');
   } finally {globalThis.chrome=previousChrome;globalThis.fetch=previousFetch;}
 });
 
@@ -269,3 +272,60 @@ test('administrator export uses write-authorized query role without broadening R
   assert.equal(body.read_only,false);
   assert.deepEqual(body.parameters,[libraryId]);
 });
+test('bootstrap and seed queries are packaged fixed SQL with no UI SQL interpolation', async () => {
+  const bundled=await readFile(new URL('../src/sql/bootstrap.sql',import.meta.url),'utf8');
+  assert.ok(bundled.includes(core.SCHEMA_PROBE_SQL));
+  assert.match(bundled,/pg_advisory_xact_lock\(981376142\)/);
+  assert.match(bundled,/VAULT_SCHEMA_INCOMPATIBLE/);
+  const bootstrap=core.queryBody('bootstrap',libraryId,bundled);
+  assert.equal(bootstrap.parameters,undefined,'multi-statement DDL must use simple query mode');
+  assert.equal(bootstrap.read_only,false);
+  const seed=core.queryBody('seed',libraryId);
+  assert.deepEqual(seed.parameters,[libraryId]);
+  assert.match(seed.query,/ON CONFLICT\(id\) DO NOTHING/);
+  assert.doesNotMatch(seed.query,/DO UPDATE|DROP|DELETE/);
+  assert.throws(()=>core.queryBody('bootstrap',libraryId,'DROP TABLE public.voices'));
+});
+for(const scenario of ['compatible','empty','missing-library','seed-race','archived-library','incompatible']) {
+  test(`connect safely handles ${scenario} project`, async()=>{
+    const saved={};let listener;let assetCalls=0;const operations=[];
+    const extensionId=`vault-bootstrap-${scenario}`;const origin=`chrome-extension://${extensionId}/`;
+    const previousChrome=globalThis.chrome;const previousFetch=globalThis.fetch;
+    let libraryAvailable=scenario==='compatible';
+    const response=(payload,status=200)=>({ok:status<400,status,headers:new Headers(),text:async()=>JSON.stringify(payload)});
+    globalThis.chrome={runtime:{id:extensionId,getURL:path=>origin+path,onMessage:{addListener(fn){listener=fn;}}},action:{onClicked:{addListener(){}}},tabs:{create:async()=>({})},storage:{session:{setAccessLevel:async()=>{},get:async key=>({[key]:saved[key]}),set:async values=>Object.assign(saved,values),remove:async key=>{delete saved[key];}}}};
+    globalThis.fetch=async(url,options)=>{
+      if(url===origin+'src/sql/bootstrap.sql'){assetCalls++;return {ok:true,text:async()=>readFile(new URL('../src/sql/bootstrap.sql',import.meta.url),'utf8')};}
+      const body=JSON.parse(options.body);
+      assert.match(url,/^https:\/\/api\.supabase\.com\//);
+      assert.equal(body.read_only,false);
+      if(body.query===core.SCHEMA_PROBE_SQL){operations.push('probe');return response([{schema_state:{state:scenario==='empty'?'empty':scenario==='incompatible'?'incompatible':'compatible'}}]);}
+      if(body.query.startsWith('-- Voice Vault bundled bootstrap v1.')){operations.push('bootstrap');assert.equal(body.parameters,undefined);return response([]);}
+      if(body.query===core.QUERIES.seed){operations.push('seed');assert.deepEqual(body.parameters,[libraryId]);if(scenario!=='archived-library')libraryAvailable=true;return response([{seed_result:{createdLibrary:scenario==='seed-race'?false:libraryAvailable,createdFolders:scenario==='seed-race'?0:libraryAvailable?3:0,libraryAvailable:scenario==='seed-race'?false:libraryAvailable}}]);}
+      assert.equal(body.query,core.QUERIES.load);operations.push('load');
+      if(!libraryAvailable)return response({message:'Library unavailable'},400);
+      const snapshot=fixture();snapshot.libraryId=libraryId;snapshot.revision=1;
+      if(scenario!=='compatible'){snapshot.voices=[];snapshot.folders=snapshot.folders.slice(0,3);}
+      return response([{snapshot}]);
+    };
+    try{
+      const background=(await readFile(new URL('../src/js/background.js',import.meta.url),'utf8')).replace("'./cloud-core.js'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(source).toString('base64')))+`\n// Bootstrap ${scenario} test isolation`;
+      await import('data:text/javascript;base64,'+Buffer.from(background).toString('base64'));
+      const send=request=>new Promise(resolve=>listener({projectRef:'ktcjeltckzdeetucfplw',libraryId,...request},{id:extensionId,url:origin+'index.html'},resolve));
+      const result=await send({action:'connect_cloud',token:'test_only_12345678901234567890',query:'DROP TABLE public.voices'});
+      if(scenario==='compatible'){
+        assert.equal(result.success,true);assert.deepEqual(operations,['probe','load']);assert.equal(assetCalls,0);assert.equal(result.data.setup.createdLibrary,false);
+        assert.equal(result.data.snapshot.voices.length,1,'existing data must remain unchanged');
+      }else if(scenario==='empty'){
+        assert.equal(result.success,true);assert.deepEqual(operations,['probe','bootstrap','seed','load']);assert.equal(assetCalls,1);assert.equal(result.data.rateLimit.requestsThisSession,4);assert.equal(result.data.snapshot.voices.length,0);assert.equal(result.data.snapshot.folders.length,3);
+      }else if(scenario==='missing-library'||scenario==='seed-race'){
+        assert.equal(result.success,true);assert.deepEqual(operations,['probe','load','seed','load']);assert.equal(assetCalls,0);assert.equal(result.data.setup.createdLibrary,scenario!=='seed-race');
+      }else if(scenario==='archived-library'){
+        assert.equal(result.code,'LIBRARY_MISSING');assert.deepEqual(operations,['probe','load','seed','load']);assert.equal(assetCalls,0);
+      }else{
+        assert.equal(result.code,'SCHEMA_INCOMPATIBLE');assert.deepEqual(operations,['probe']);assert.equal(assetCalls,0);
+      }
+      assert.equal((await send({action:'cloud_status'})).data.connected,result.success===true);
+    }finally{globalThis.chrome=previousChrome;globalThis.fetch=previousFetch;}
+  });
+}

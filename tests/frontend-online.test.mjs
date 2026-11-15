@@ -281,7 +281,7 @@ test('logout invalidates an in-flight upload before any cover can enter the libr
 test('original vault affordances remain and no local-server or bundled voice fallback exists', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const app = await readFile(new URL('../src/js/app.js', import.meta.url), 'utf8');
-  for (const id of ['treeViewModal', 'folderTabsWrapper', 'sidebarFolderList', 'addModal', 'cropCanvas', 'toggleMultiSelectMode', 'batchActionBar', 'toggleQuickFolderBadge', 'importDataBtn', 'exportDataBtn', 'modalNotesInput']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['folderTabsWrapper', 'sidebarFolderList', 'addModal', 'cropCanvas', 'toggleMultiSelectMode', 'batchActionBar', 'toggleQuickFolderBadge', 'importDataBtn', 'exportDataBtn', 'modalNotesInput']) assert.match(html, new RegExp(`id="${id}"`));
   for (const method of ['parseVoiceVersion', 'createGroupCard', 'toggleFavorite', 'changeVoiceFolder', 'applyBatchMove', 'loadAndCropSquare']) assert.match(app, new RegExp(method + '\\('));
   assert.doesNotMatch(app, /https?:\/\/(?:localhost|127\.0\.0\.1)/);
   assert.doesNotMatch(app, /fetch\([^\n]*voices\.json/);

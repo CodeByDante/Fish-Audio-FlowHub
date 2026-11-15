@@ -1,6 +1,6 @@
 {
   "name": "fish-audio-vault-online",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "Extensión Chrome MV3 para administrar una biblioteca de Fish Audio en Supabase.",
