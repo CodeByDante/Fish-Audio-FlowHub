@@ -1,4 +1,4 @@
-# Fish Audio Voice Vault Online
+# Fish Audio FlowHub
 
 <img src="images/icon128.png" width="72" height="72" alt="Logo Fish Audio Voice Vault Online">
 
@@ -6,7 +6,7 @@ Aplicación web y extensión de Chrome que conservan la interfaz negra de [Fish 
 
 ## Abrir la web
 
-[**Abrir Fish Audio Vault Online en GitHub Pages**](https://codebydante.github.io/fish-audio-vault-online/)
+[**Abrir Fish Audio FlowHub en GitHub Pages**](https://codebydante.github.io/Fish-Audio-FlowHub/)
 
 Introduce tu token para cargar la misma biblioteca de la extensión. Después se guarda una copia cifrada en este navegador: abrir, recargar o volver a la pestaña muestra esa copia sin consultar Supabase. Pulsa **Actualizar** para traer los cambios guardados desde otro navegador o desde la extensión. La reproducción no guarda la biblioteca.
 
@@ -14,7 +14,7 @@ La sesión se recuerda en este navegador hasta pulsar **Cerrar sesión**, tanto 
 
 ## Instalar la extensión
 
-1. Descarga el ZIP de **Assets** en la [última versión](https://github.com/CodeByDante/fish-audio-vault-online/releases/latest) y descomprímelo.
+1. Descarga el ZIP de **Assets** en la [última versión](https://github.com/CodeByDante/Fish-Audio-FlowHub/releases/latest) y descomprímelo.
 2. Abre `chrome://extensions` y activa **Modo de desarrollador**.
 3. Pulsa **Cargar descomprimida** y selecciona la carpeta que contiene `manifest.json`.
 4. Pulsa el icono de la extensión. Introduce tu token personal de Supabase (`sbp_…`) y pulsa **Conectar biblioteca**.
