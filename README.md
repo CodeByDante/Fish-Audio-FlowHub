@@ -103,7 +103,7 @@ npm run package
 npm run build:pages
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.2.3.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.2.4.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 `npm run build:pages` genera `dist/pages` usando una lista explícita de archivos públicos. `.github/workflows/pages.yml` comprueba y publica ese directorio en GitHub Pages al actualizar `main`. GitHub Actions publica el código; los datos se sincronizan a través de Supabase, no de commits.
 

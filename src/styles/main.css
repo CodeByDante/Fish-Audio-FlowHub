@@ -1994,3 +1994,6 @@ textarea.form-control { font: inherit; resize: vertical; min-height: 4.5rem; }
 #modalNotesInput::-webkit-resizer { display: none; }
 html.vault-modal-open, body.vault-modal-open { overflow: hidden !important; overscroll-behavior: none; }
 #addModal, #addModal .modal-content { overscroll-behavior: contain; }
+
+/* Keep only the notes editor visually quiet while typing. */
+#modalNotesInput:focus, #modalNotesInput:focus-visible { outline: none; box-shadow: none; border-color: #262626; background: #141414; }
