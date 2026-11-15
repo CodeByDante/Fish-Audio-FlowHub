@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+__pycache__/
+*.pyc
+firebase_key.json
+voices.json
+voices_*.json
+backups/
+recovery_*/
+revision_*/
+.openai/
+*.log
+*.pem
+*.key

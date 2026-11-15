@@ -1,0 +1,8 @@
+# The function validates the administrator PAT with one fixed Management SELECT
+# per valid request: read-only gate for signing, write gate for image uploads.
+# verify_jwt=false does NOT disable handler authorization.
+# SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are runtime-only Supabase secrets.
+# Optional runtime VOICE_VAULT_EXTENSION_IDS pins comma-separated Chrome IDs.
+[functions.voice-vault-storage]
+verify_jwt = false
+entrypoint = "./functions/voice-vault-storage/index.ts"
