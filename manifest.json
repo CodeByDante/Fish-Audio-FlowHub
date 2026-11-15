@@ -1,20 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Fish Audio Voice Vault Online",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "minimum_chrome_version": "120",
   "description": "La biblioteca de voces de Fish Audio, con la interfaz original y guardado online en tu Supabase mediante token de administración.",
   "icons": {
     "16": "images/icon16.png",
     "48": "images/icon48.png",
-    "128": "images/icon128.png"
+    "128": "images/icon128.png",
+    "32": "images/icon32.png"
   },
   "action": {
     "default_title": "Abrir Fish Audio Voice Vault Online",
     "default_icon": {
       "16": "images/icon16.png",
       "48": "images/icon48.png",
-      "128": "images/icon128.png"
+      "128": "images/icon128.png",
+      "32": "images/icon32.png"
     }
   },
   "background": {

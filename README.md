@@ -1,5 +1,7 @@
 # Fish Audio Voice Vault Online
 
+<img src="images/icon128.png" width="72" height="72" alt="Logo Fish Audio Voice Vault Online">
+
 Extensión de Chrome que conserva la interfaz negra y las herramientas de [Fish Audio Vault](https://github.com/CodeByDante/fish-audio-vault), con biblioteca online en Supabase. Se abre en una pestaña completa y conecta mediante tu token personal de administración. No necesita el antiguo servidor local ni Firebase.
 
 ## Instalar
@@ -82,7 +84,7 @@ npm test
 npm run package
 ```
 
-El paquete queda en `dist/fish-audio-vault-online-v2.0.1.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
+El paquete queda en `dist/fish-audio-vault-online-v2.0.2.zip`. Solo incluye archivos necesarios de la extensión, con una lista permitida explícita y revisión de patrones de credenciales. GitHub Actions ejecuta las comprobaciones y genera el ZIP.
 
 La extensión se instala en Chrome; abrir `index.html` como una web normal no proporciona el service worker ni la API `chrome.storage.session`.
 

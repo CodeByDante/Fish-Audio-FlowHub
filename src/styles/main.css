@@ -2124,3 +2124,6 @@ textarea.form-control { font: inherit; resize: vertical; min-height: 4.5rem; }
 /* Keep the added online controls legible within the original dark header. */
 #cloudRefreshBtn, #cloudLogoutBtn { color: var(--text-main); flex-shrink: 0; }
 #cloudRefreshBtn svg, #cloudLogoutBtn svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: var(--text-main); stroke-width: 2; }
+
+/* Shared extension, browser tab and app identity. */
+.brand-icon { width: 32px; height: 32px; flex-shrink: 0; object-fit: contain; }
